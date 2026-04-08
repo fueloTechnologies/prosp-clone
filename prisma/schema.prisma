@@ -1,0 +1,277 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  plan          Plan      @default(FREE)
+  trialEndsAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  linkedInAccs  LinkedInAccount[]
+  campaigns     Campaign[]
+  contacts      Contact[]
+  conversations Conversation[]
+  messages      Message[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model LinkedInAccount {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  profileUrl  String?
+  avatar      String?
+  status      LinkedInStatus @default(ACTIVE)
+  dailyLimit  Int      @default(25)
+  sentToday   Int      @default(0)
+  proxy       String?
+  cookie      String?  // LinkedIn session cookie
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  messages      Message[]
+
+  @@map("linkedin_accounts")
+}
+
+model Contact {
+  id              String   @id @default(cuid())
+  userId          String
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String?
+  linkedInUrl     String?
+  company         String?
+  position        String?
+  location        String?
+  avatar          String?
+  enriched        Boolean  @default(false)
+  enrichedData    Json?    // Data from Prospeo, Dropcontact, etc.
+  tags            String[]
+  notes           String?
+  status          ContactStatus @default(NEW)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaignContacts CampaignContact[]
+  conversations   Conversation[]
+
+  @@map("contacts")
+}
+
+model Campaign {
+  id            String         @id @default(cuid())
+  userId        String
+  name          String
+  status        CampaignStatus @default(DRAFT)
+  dailyLimit    Int            @default(25)
+  totalContacts Int            @default(0)
+  sentCount     Int            @default(0)
+  replyCount    Int            @default(0)
+  settings      Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps    CampaignStep[]
+  contacts CampaignContact[]
+
+  @@map("campaigns")
+}
+
+model CampaignStep {
+  id         String       @id @default(cuid())
+  campaignId String
+  order      Int
+  type       StepType
+  delay      Int          @default(0) // hours to wait
+  subject    String?      // for email
+  content    String
+  aiEnhanced Boolean      @default(false)
+  createdAt  DateTime     @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@map("campaign_steps")
+}
+
+model CampaignContact {
+  id           String               @id @default(cuid())
+  campaignId   String
+  contactId    String
+  status       CampaignContactStatus @default(PENDING)
+  currentStep  Int                  @default(0)
+  nextSendAt   DateTime?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+  @@map("campaign_contacts")
+}
+
+model Conversation {
+  id              String   @id @default(cuid())
+  userId          String
+  contactId       String
+  linkedInAccId   String?
+  channel         Channel  @default(LINKEDIN)
+  lastMessageAt   DateTime @default(now())
+  unreadCount     Int      @default(0)
+  status          ConvStatus @default(ACTIVE)
+  createdAt       DateTime @default(now())
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact     Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  linkedInAcc LinkedInAccount? @relation(fields: [linkedInAccId], references: [id])
+  messages    Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  userId         String
+  linkedInAccId  String?
+  direction      Direction
+  type           MessageType @default(TEXT)
+  content        String
+  sentAt         DateTime    @default(now())
+  readAt         DateTime?
+  aiGenerated    Boolean     @default(false)
+
+  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedInAcc  LinkedInAccount? @relation(fields: [linkedInAccId], references: [id])
+
+  @@map("messages")
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  AGENCY
+}
+
+enum LinkedInStatus {
+  ACTIVE
+  PAUSED
+  BLOCKED
+  WARMING
+}
+
+enum ContactStatus {
+  NEW
+  CONTACTED
+  REPLIED
+  INTERESTED
+  NOT_INTERESTED
+  CONVERTED
+}
+
+enum CampaignStatus {
+  DRAFT
+  PENDING
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum CampaignContactStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REPLIED
+  BOUNCED
+  UNSUBSCRIBED
+}
+
+enum StepType {
+  CONNECTION_REQUEST
+  MESSAGE
+  EMAIL
+  VOICE_NOTE
+  WHATSAPP
+  FOLLOW_UP
+  WAIT
+}
+
+enum Channel {
+  LINKEDIN
+  EMAIL
+  WHATSAPP
+  PHONE
+}
+
+enum ConvStatus {
+  ACTIVE
+  ARCHIVED
+  SPAM
+}
+
+enum Direction {
+  SENT
+  RECEIVED
+}
+
+enum MessageType {
+  TEXT
+  VOICE
+  IMAGE
+  FILE
+}
