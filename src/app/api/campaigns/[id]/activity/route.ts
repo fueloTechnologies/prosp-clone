@@ -3,14 +3,15 @@ import prisma from "@/lib/prisma";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await context.params;
     const executions = await prisma.campaignStepExecution.findMany({
       where: {
         step: {
           is: {
-            campaignId: params.id,
+            campaignId: id,
           },
         },
       },
