@@ -1,57 +1,152 @@
-// src/app/api/campaigns/[id]/contacts/route.ts
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import prisma from '@/lib/prisma'
 
+
+/* =========================
+   GET CAMPAIGN CONTACTS
+========================= */
 export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } }
+  req: Request,
+  context: { params: Promise<{ id: string }> }
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  try {
 
-  const contacts = await prisma.campaignContact.findMany({
-    where: { campaignId: params.id },
-    include: { contact: true },
-    orderBy: { createdAt: 'asc' },
-  })
-  return NextResponse.json(contacts)
+    const params = await context.params
+    const campaignId = String(params.id)
+
+    const session =
+      await getServerSession(authOptions)
+
+    if (!session?.user?.id) {
+      return NextResponse.json([])
+    }
+
+    const contacts =
+      await prisma.campaignContact.findMany({
+
+        where: {
+          campaignId
+        },
+
+        include: {
+          contact: true
+        },
+
+        orderBy: {
+          createdAt: 'desc'
+        }
+
+      })
+
+    return NextResponse.json(contacts)
+
+  } catch (error) {
+
+    console.error("GET CONTACTS ERROR:", error)
+
+    return NextResponse.json([])
+
+  }
 }
+
+
+
+/* =========================
+   ADD CONTACTS TO CAMPAIGN
+========================= */
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { contactIds }: { contactIds: string[] } = await req.json()
+  try {
 
-  // Verify campaign ownership
-  const campaign = await prisma.campaign.findUnique({
-    where: { id: params.id, userId: session.user.id },
-  })
-  if (!campaign) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const params =
+      await context.params
 
-  // Add contacts, skip duplicates
-  await prisma.campaignContact.createMany({
-    data: contactIds.map((contactId) => ({
-      campaignId: params.id,
-      contactId,
-      status: 'PENDING',
-    })),
-    skipDuplicates: true,
-  })
+    const campaignId =
+      String(params.id)
 
-  // Update totalContacts count
-  const count = await prisma.campaignContact.count({ where: { campaignId: params.id } })
-  await prisma.campaign.update({
-    where: { id: params.id },
-    data: { totalContacts: count },
-  })
+    const session =
+      await getServerSession(authOptions)
 
-  return NextResponse.json({ success: true, count })
+    if (!session?.user?.id) {
+
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+
+    }
+
+    const body =
+      await req.json()
+
+    const contactIds =
+      body.contactIds || []
+
+    if (!Array.isArray(contactIds)) {
+
+      return NextResponse.json(
+        { error: 'Invalid contactIds' },
+        { status: 400 }
+      )
+
+    }
+
+    console.log(
+      "Adding contacts:",
+      contactIds
+    )
+
+    const created =
+      await prisma.campaignContact.createMany({
+
+        data:
+
+          contactIds.map((cid: string) => ({
+
+            campaignId,
+            contactId: cid,
+            status: 'PENDING',
+            currentStep: 0,
+            nextSendAt: null
+
+          })),
+
+        skipDuplicates: true
+
+      })
+
+    console.log(
+      "Contacts added:",
+      created.count
+    )
+
+    return NextResponse.json({
+
+      success: true,
+      count: created.count
+
+    })
+
+  }
+
+  catch (error) {
+
+    console.error(
+      'POST CONTACTS ERROR:',
+      error
+    )
+
+    return NextResponse.json(
+      { error: 'Failed to add contacts' },
+      { status: 500 }
+    )
+
+  }
+
 }

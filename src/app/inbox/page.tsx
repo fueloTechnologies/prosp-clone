@@ -1,81 +1,273 @@
 'use client'
-// src/app/inbox/page.tsx
-import { useState, useEffect } from 'react'
+
+import { useEffect, useState } from 'react'
 import AppShell from '@/components/layout/AppShell'
-import ConversationList from '@/components/inbox/ConversationList'
-import MessageThread from '@/components/inbox/MessageThread'
-import AccountSidebar from '@/components/inbox/AccountSidebar'
+
+
 
 export default function InboxPage() {
-  const [conversations, setConversations] = useState<any[]>([])
-  const [selected, setSelected] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [activeAccount, setActiveAccount] = useState(0)
+
+  const [conversations, setConversations] =
+    useState<any[]>([])
+
+  const [selected, setSelected] =
+    useState<any>(null)
+
+
+
+  /* =========================
+     LOAD + AUTO REFRESH
+  ========================= */
 
   useEffect(() => {
-    fetch('/api/conversations')
-      .then((r) => r.json())
-      .then((data) => {
-        setConversations(data)
-        if (data.length > 0) setSelected(data[0])
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [])
 
-  const handleSelect = (conv: any) => {
+    const loadInbox = async () => {
+
+      try {
+
+        const res =
+          await fetch('/api/inbox')
+
+        const data =
+          await res.json()
+
+
+
+        setConversations(data)
+
+
+
+        /* Keep selected synced */
+
+        if (selected) {
+
+          const updated =
+            data.find(
+              (c: any) =>
+                c.id === selected.id
+            )
+
+          if (updated) {
+            setSelected(updated)
+          }
+
+        }
+
+        else if (data.length > 0) {
+
+          setSelected(data[0])
+
+        }
+
+      }
+
+      catch (error) {
+
+        console.error(
+          'Inbox load failed:',
+          error
+        )
+
+      }
+
+    }
+
+
+
+    /* Initial load */
+
+    loadInbox()
+
+
+
+    /* Auto refresh every 5 seconds */
+
+    const interval =
+      setInterval(
+        loadInbox,
+        5000
+      )
+
+
+
+    return () =>
+      clearInterval(interval)
+
+
+
+  }, [selected])
+
+
+
+  /* =========================
+     SELECT CONVERSATION
+     + MARK AS READ
+  ========================= */
+
+  const handleSelect = async (conv: any) => {
+
     setSelected(conv)
-    // Mark as read locally
-    setConversations((prev) =>
-      prev.map((c) => (c.id === conv.id ? { ...c, unreadCount: 0 } : c))
-    )
+
+    try {
+
+      await fetch(
+        `/api/conversations/${conv.id}/read`,
+        { method: 'POST' }
+      )
+
+
+
+      /* Update UI instantly */
+
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === conv.id
+            ? { ...c, unreadCount: 0 }
+            : c
+        )
+      )
+
+    }
+
+    catch (error) {
+
+      console.error(
+        'Mark read failed:',
+        error
+      )
+
+    }
+
   }
 
+
+
   return (
+
     <AppShell activeTab="inbox">
-      <div className="flex flex-1 overflow-hidden">
-        {/* LinkedIn account switcher */}
-        <AccountSidebar activeIndex={activeAccount} onSelect={setActiveAccount} />
 
-        {/* Conversation list */}
-        <div className="w-72 border-r border-border flex flex-col flex-shrink-0">
-          <ConversationList
-            conversations={conversations}
-            selected={selected}
-            onSelect={handleSelect}
-            loading={loading}
-          />
-        </div>
+      <div className="flex h-full">
 
-        {/* Message thread */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {selected ? (
-            <MessageThread
-              key={selected.id}
-              conversation={selected}
-              onMessageSent={(msg: any) => {
-                setConversations((prev) =>
-                  prev.map((c) =>
-                    c.id === selected.id
-                      ? { ...c, lastMessageAt: new Date().toISOString() }
-                      : c
-                  )
-                )
-              }}
-            />
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-ink-tertiary">
-              <div className="text-center">
-                <div className="text-5xl mb-4">💬</div>
-                <p className="font-semibold text-ink mb-1">No conversation selected</p>
-                <p className="text-sm text-ink-secondary">
-                  Pick a conversation from the left
-                </p>
+        {/* =========================
+           LEFT PANEL
+        ========================= */}
+
+        <div className="w-80 border-r overflow-y-auto">
+
+          {conversations.map(conv => (
+
+            <div
+              key={conv.id}
+
+              onClick={() =>
+                handleSelect(conv)
+              }
+
+              className="p-4 border-b cursor-pointer hover:bg-gray-50"
+            >
+
+              {/* NAME + UNREAD */}
+
+              <div className="font-medium flex justify-between items-center">
+
+                <span>
+
+                  {conv.contact?.firstName || 'Unknown'}{' '}
+
+                  {conv.contact?.lastName || 'Contact'}
+
+                </span>
+
+
+
+                {conv.unreadCount > 0 && (
+
+                  <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">
+
+                    {conv.unreadCount}
+
+                  </span>
+
+                )}
+
               </div>
+
+
+
+              {/* MESSAGE COUNT */}
+
+              <div className="text-sm text-gray-500">
+
+                {conv.messages?.length || 0} messages
+
+              </div>
+
             </div>
-          )}
+
+          ))}
+
         </div>
+
+
+
+        {/* =========================
+           RIGHT PANEL
+        ========================= */}
+
+        <div className="flex-1 overflow-y-auto p-6">
+
+          {selected ? (
+
+            selected.messages?.map((msg: any) => (
+
+              <div
+                key={msg.id}
+                className="mb-4"
+              >
+
+                {/* META */}
+
+                <div className="text-xs text-gray-400">
+
+                  {msg.direction} •{' '}
+
+                  {msg.sentAt
+                    ? new Date(msg.sentAt).toLocaleString()
+                    : ''
+                  }
+
+                </div>
+
+
+
+                {/* MESSAGE */}
+
+                <div className="p-3 rounded-lg bg-gray-100">
+
+                  {msg.content}
+
+                </div>
+
+              </div>
+
+            ))
+
+          ) : (
+
+            <div className="text-gray-400">
+
+              No messages yet
+
+            </div>
+
+          )}
+
+        </div>
+
       </div>
+
     </AppShell>
+
   )
+
 }

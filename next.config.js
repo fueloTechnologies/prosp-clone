@@ -1,16 +1,26 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  images: {
-    domains: [
-      'api.dicebear.com',
-      'avatars.githubusercontent.com',
-      'lh3.googleusercontent.com',
-      'media.licdn.com',
-    ],
+  async headers() {
+    return [
+      {
+        source: "/api/:path*",
+        headers: [
+          {
+            key: "Access-Control-Allow-Origin",
+            value: "*",
+          },
+          {
+            key: "Access-Control-Allow-Methods",
+            value: "GET,POST,PUT,DELETE,OPTIONS",
+          },
+          {
+            key: "Access-Control-Allow-Headers",
+            value: "*",
+          },
+        ],
+      },
+    ];
   },
-  experimental: {
-    serverComponentsExternalPackages: ['@prisma/client'],
-  },
-}
+};
 
-module.exports = nextConfig
+module.exports = nextConfig;

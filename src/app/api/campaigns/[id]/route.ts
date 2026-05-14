@@ -1,63 +1,143 @@
-// src/app/api/campaigns/[id]/route.ts
-import { NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/prisma";
+
+/* =========================
+   GET SINGLE CAMPAIGN
+========================= */
 
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  try {
+    const session = await getServerSession(authOptions);
 
-  const campaign = await prisma.campaign.findUnique({
-    where: { id: params.id, userId: session.user.id },
-    include: {
-      steps: { orderBy: { order: 'asc' } },
-      _count: { select: { contacts: true } },
-    },
-  })
-  if (!campaign) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json(campaign)
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const campaign = await prisma.campaign.findFirst({
+      where: {
+        id: params.id,
+        userId: session.user.id,
+      },
+
+      include: {
+        contacts: true,
+        steps: {
+          orderBy: {
+            order: "asc",
+          },
+        },
+        _count: {
+          select: {
+            contacts: true,
+          },
+        },
+      },
+    });
+
+    if (!campaign) {
+      return NextResponse.json(
+        { error: "Campaign not found" },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({
+      ...campaign,
+      totalContacts: campaign._count?.contacts || 0,
+    });
+  } catch (error) {
+    console.error("GET SINGLE CAMPAIGN ERROR:", error);
+
+    return NextResponse.json(
+      { error: "Failed to fetch campaign" },
+      { status: 500 },
+    );
+  }
 }
+
+/* =========================
+   UPDATE CAMPAIGN
+========================= */
 
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  try {
+    const session = await getServerSession(authOptions);
 
-  const body = await req.json()
-  const campaign = await prisma.campaign.update({
-    where: { id: params.id, userId: session.user.id },
-    data: {
-      ...(body.name !== undefined && { name: body.name }),
-      ...(body.status !== undefined && { status: body.status }),
-      ...(body.dailyLimit !== undefined && { dailyLimit: body.dailyLimit }),
-      ...(body.totalContacts !== undefined && { totalContacts: body.totalContacts }),
-    },
-    include: {
-      steps: { orderBy: { order: 'asc' } },
-      _count: { select: { contacts: true } },
-    },
-  })
-  return NextResponse.json(campaign)
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json();
+
+    const campaign = await prisma.campaign.update({
+      where: {
+        id: params.id,
+      },
+
+      data: {
+        ...(body.name !== undefined && {
+          name: body.name,
+        }),
+
+        ...(body.status !== undefined && {
+          status: body.status,
+        }),
+
+        ...(body.dailyLimit !== undefined && {
+          dailyLimit: body.dailyLimit,
+        }),
+      },
+    });
+
+    return NextResponse.json(campaign);
+  } catch (error) {
+    console.error("UPDATE CAMPAIGN ERROR:", error);
+
+    return NextResponse.json(
+      { error: "Failed to update campaign" },
+      { status: 500 },
+    );
+  }
 }
+
+/* =========================
+   DELETE CAMPAIGN
+========================= */
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  try {
+    const session = await getServerSession(authOptions);
 
-  await prisma.campaign.delete({
-    where: { id: params.id, userId: session.user.id },
-  })
-  return NextResponse.json({ success: true })
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    await prisma.campaign.delete({
+      where: {
+        id: params.id,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+    });
+  } catch (error) {
+    console.error("DELETE CAMPAIGN ERROR:", error);
+
+    return NextResponse.json(
+      { error: "Failed to delete campaign" },
+      { status: 500 },
+    );
+  }
 }

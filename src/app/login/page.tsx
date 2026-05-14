@@ -1,35 +1,35 @@
-'use client'
+"use client";
 // src/app/login/page.tsx
-import { useState } from 'react'
-import { signIn } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
-import { Heart, Mail, Lock, ArrowRight, Sparkles } from 'lucide-react'
+import { useState } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { Heart, Mail, Lock, ArrowRight, Sparkles } from "lucide-react";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('demo@prosp.ai')
-  const [password, setPassword] = useState('demo123')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const router = useRouter()
+  const [email, setEmail] = useState("demo@prosp.ai");
+  const [password, setPassword] = useState("demo123");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
+    e.preventDefault();
+    setLoading(true);
+    setError("");
 
-    const result = await signIn('credentials', {
+    const result = await signIn("credentials", {
       email,
       password,
       redirect: false,
-    })
+    });
 
     if (result?.error) {
-      setError('Invalid credentials. Use demo@prosp.ai')
-      setLoading(false)
+      setError("Invalid credentials. Use demo@prosp.ai");
+      setLoading(false);
     } else {
-      router.push('/sequences')
+      router.push("/sequences");
     }
-  }
+  };
 
   return (
     <div className="app-shell">
@@ -40,7 +40,9 @@ export default function LoginPage() {
             <div className="w-10 h-10 bg-brand-500 rounded-xl flex items-center justify-center">
               <Heart size={20} className="text-white fill-white" />
             </div>
-            <span className="text-2xl font-bold text-white">Prosp</span>
+            <span className="text-2xl font-bold text-white">
+              LinkedIn-Connector
+            </span>
           </div>
           <p className="text-white/60 text-sm">AI-Powered LinkedIn Outreach</p>
         </div>
@@ -63,7 +65,10 @@ export default function LoginPage() {
                 Email
               </label>
               <div className="relative">
-                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary" />
+                <Mail
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
+                />
                 <input
                   type="email"
                   value={email}
@@ -79,7 +84,10 @@ export default function LoginPage() {
                 Password
               </label>
               <div className="relative">
-                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary" />
+                <Lock
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
+                />
                 <input
                   type="password"
                   value={password}
@@ -116,5 +124,5 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

@@ -5,8 +5,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -119,6 +120,7 @@ model Campaign {
   totalContacts Int            @default(0)
   sentCount     Int            @default(0)
   replyCount    Int            @default(0)
+  meetingCount  Int            @default(0)
   settings      Json?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -126,41 +128,83 @@ model Campaign {
   user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   steps    CampaignStep[]
   contacts CampaignContact[]
+  conversations Conversation[] 
 
   @@map("campaigns")
 }
 
 model CampaignStep {
-  id         String       @id @default(cuid())
-  campaignId String
-  order      Int
-  type       StepType
-  delay      Int          @default(0) // hours to wait
-  subject    String?      // for email
-  content    String
-  aiEnhanced Boolean      @default(false)
-  createdAt  DateTime     @default(now())
+  id          String    @id @default(cuid())
+  campaignId  String
 
-  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  order       Int
+  type        StepType
+
+  delay       Int       @default(0) // hours
+
+  subject     String?
+  content     String?
+
+  aiEnhanced  Boolean   @default(false)
+
+  createdAt   DateTime  @default(now())
+
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  executions  CampaignStepExecution[]
 
   @@map("campaign_steps")
 }
 
 model CampaignContact {
-  id           String               @id @default(cuid())
-  campaignId   String
-  contactId    String
-  status       CampaignContactStatus @default(PENDING)
-  currentStep  Int                  @default(0)
-  nextSendAt   DateTime?
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  id            String                  @id @default(cuid())
 
-  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  campaignId    String
+  contactId     String
+
+  status        CampaignContactStatus   @default(PENDING)
+
+  currentStep   Int                     @default(0)
+
+  nextSendAt    DateTime?
+
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  campaign      Campaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  contact       Contact                 @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  executions    CampaignStepExecution[]
 
   @@unique([campaignId, contactId])
+
   @@map("campaign_contacts")
+}
+
+model CampaignStepExecution {
+  id                 String    @id @default(cuid())
+
+  campaignContactId  String?
+  stepId             String?
+
+  status             ExecutionStatus @default(PENDING)
+
+  scheduledFor       DateTime?
+
+  executedAt         DateTime?
+
+  error              String?
+
+  createdAt          DateTime  @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  campaignContact    CampaignContact? @relation(fields: [campaignContactId], references: [id], onDelete: Cascade)
+
+  step               CampaignStep? @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@map("campaign_step_executions")
 }
 
 model Conversation {
@@ -168,6 +212,7 @@ model Conversation {
   userId          String
   contactId       String
   linkedInAccId   String?
+   campaignId    String? 
   channel         Channel  @default(LINKEDIN)
   lastMessageAt   DateTime @default(now())
   unreadCount     Int      @default(0)
@@ -177,6 +222,7 @@ model Conversation {
   user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   contact     Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
   linkedInAcc LinkedInAccount? @relation(fields: [linkedInAccId], references: [id])
+   campaign    Campaign?        @relation(fields: [campaignId], references: [id])  
   messages    Message[]
 
   @@map("conversations")
@@ -191,6 +237,7 @@ model Message {
   type           MessageType @default(TEXT)
   content        String
   sentAt         DateTime    @default(now())
+  replyAt        DateTime?
   readAt         DateTime?
   aiGenerated    Boolean     @default(false)
 
@@ -274,4 +321,11 @@ enum MessageType {
   VOICE
   IMAGE
   FILE
+}
+
+enum ExecutionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
 }

@@ -183,6 +183,9 @@ async function main() {
     },
   })
 
+
+
+
   // Create conversations and messages for Joan Smith (matching the screenshot)
   const joanContact = contacts.find(c => c.firstName === 'Joan')!
   const conversation = await prisma.conversation.create({
