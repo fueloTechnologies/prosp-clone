@@ -7,54 +7,30 @@ export async function POST(
 ) {
   try {
     const params = await context.params;
-
     const campaignId = params.id;
-
     const now = new Date();
 
     console.log("Launching campaign:", campaignId);
 
-    /* =========================
-       SET CAMPAIGN ACTIVE
-    ========================== */
-
     await prisma.campaign.update({
-      where: {
-        id: campaignId,
-      },
-
-      data: {
-        status: "ACTIVE",
-      },
+      where: { id: campaignId },
+      data: { status: "ACTIVE" },
     });
 
-    /* =========================
-       START ALL CONTACTS
-    ========================== */
-
     await prisma.campaignContact.updateMany({
-      where: {
-        campaignId: campaignId,
-      },
-
+      where: { campaignId: campaignId },
       data: {
         status: "IN_PROGRESS",
-
         currentStep: 0,
-
         nextSendAt: now,
       },
     });
 
-    return NextResponse.json({
-      success: true,
-    });
+    return NextResponse.json({ success: true });
   } catch (error) {
     console.error("LAUNCH ERROR:", error);
-
     return NextResponse.json(
       { error: "Failed to launch campaign" },
-
       { status: 500 },
     );
   }
