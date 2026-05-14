@@ -9,9 +9,10 @@ import prisma from "@/lib/prisma";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await context.params;
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -20,7 +21,7 @@ export async function GET(
 
     const campaign = await prisma.campaign.findFirst({
       where: {
-        id: params.id,
+        id: id,
         userId: session.user.id,
       },
 
