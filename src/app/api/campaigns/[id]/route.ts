@@ -13,6 +13,7 @@ export async function GET(
 ) {
   try {
     const { id } = await context.params;
+
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -21,17 +22,19 @@ export async function GET(
 
     const campaign = await prisma.campaign.findFirst({
       where: {
-        id: id,
+        id,
         userId: session.user.id,
       },
 
       include: {
         contacts: true,
+
         steps: {
           orderBy: {
             order: "asc",
           },
         },
+
         _count: {
           select: {
             contacts: true,
@@ -67,9 +70,11 @@ export async function GET(
 
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await context.params;
+
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -80,7 +85,7 @@ export async function PATCH(
 
     const campaign = await prisma.campaign.update({
       where: {
-        id: params.id,
+        id,
       },
 
       data: {
@@ -115,9 +120,11 @@ export async function PATCH(
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await context.params;
+
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -126,7 +133,7 @@ export async function DELETE(
 
     await prisma.campaign.delete({
       where: {
-        id: params.id,
+        id,
       },
     });
 
