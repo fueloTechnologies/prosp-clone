@@ -109,6 +109,25 @@ export default function AppShell({ children, activeTab }: AppShellProps) {
                 Days of free trial: 14
               </span>
             </div>
+            <button
+              onClick={() => router.push("/settings")}
+              className="
+    w-10
+    h-10
+    rounded-xl
+    border
+    border-[#ececf4]
+    bg-white
+    flex
+    items-center
+    justify-center
+    hover:bg-[#f8f8fc]
+    transition-all
+    duration-200
+  "
+            >
+              <Settings size={18} className="text-gray-600" />
+            </button>
             {/* User avatar + dropdown */}
             <div className="relative">
               <button
@@ -162,20 +181,10 @@ export default function AppShell({ children, activeTab }: AppShellProps) {
                   }}
                   className={`sidebar-icon ${activeTab === key ? "active" : ""}`}
                 >
-                  <Icon size={18} />
+                  <Icon size={18} className="text-current" />
                 </button>
               );
             })}
-
-            <div className="mt-auto">
-              <button
-                title="Settings"
-                onClick={() => router.push("/settings")}
-                className="sidebar-icon"
-              >
-                <Settings size={18} />
-              </button>
-            </div>
           </div>
 
           {/* Main content area */}

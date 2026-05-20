@@ -138,7 +138,17 @@ export default function DashboardPage() {
   return (
     <AppShell activeTab="dashboard">
       {/* LinkedIn Section */}
-      <div className="bg-white border rounded-xl p-6 mb-6">
+      <div
+        className="
+bg-white
+border
+border-[#ececf4]
+rounded-[28px]
+p-8
+mb-6
+shadow-sm
+"
+      >
         <h2 className="text-lg font-semibold">
           Let's get started {user?.name || "User"} 👋
         </h2>
@@ -147,7 +157,21 @@ export default function DashboardPage() {
           Follow these steps to get the most out of our features
         </p>
 
-        <div className="border rounded-lg p-4 mt-4 flex justify-between items-center">
+        <div
+          className="
+border
+border-[#ececf4]
+rounded-2xl
+p-5
+mt-4
+flex
+justify-between
+items-center
+hover:shadow-md
+transition-all
+duration-200
+"
+        >
           <div>
             <h3 className="font-medium">Connect your LinkedIn account</h3>
 
@@ -165,7 +189,21 @@ export default function DashboardPage() {
           </button>{" "}
         </div>
 
-        <div className="border rounded-lg p-4 mt-3 flex justify-between items-center">
+        <div
+          className="
+border
+border-[#ececf4]
+rounded-2xl
+p-5
+mt-4
+flex
+justify-between
+items-center
+hover:shadow-md
+transition-all
+duration-200
+"
+        >
           <div>
             <h3 className="font-medium">Create a campaign</h3>
 
@@ -184,7 +222,7 @@ export default function DashboardPage() {
         </div>
       </div>
       {/* Analytics Section — MOVED INSIDE */}
-      <div className="px-2 md:px-6">
+      <div className="px-6 py-6">
         {/* Header */}
 
         <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
@@ -204,7 +242,18 @@ export default function DashboardPage() {
             <select
               value={timeFilter}
               onChange={(e) => setTimeFilter(e.target.value)}
-              className="border rounded px-3 py-2 text-sm bg-white"
+              className="
+bg-white
+border
+border-[#ececf4]
+rounded-xl
+px-4
+py-3
+text-sm
+outline-none
+focus:ring-4
+focus:ring-violet-100
+"
             >
               <option value="all">All Time</option>
 
@@ -218,7 +267,19 @@ export default function DashboardPage() {
             <select
               value={selectedCampaign}
               onChange={(e) => setSelectedCampaign(e.target.value)}
-              className="border rounded px-3 py-2 text-sm bg-white min-w-[180px]"
+              className="
+bg-white
+border
+border-[#ececf4]
+rounded-xl
+px-4
+py-3
+text-sm
+min-w-[220px]
+outline-none
+focus:ring-4
+focus:ring-violet-100
+"
             >
               <option value="">Select Campaigns</option>
 
@@ -238,7 +299,17 @@ export default function DashboardPage() {
 
             <button
               onClick={handleExport}
-              className="border rounded px-4 py-2 text-sm hover:bg-gray-50"
+              className="
+border
+border-[#ececf4]
+rounded-xl
+px-5
+py-3
+text-sm
+font-medium
+hover:bg-[#f8f8fc]
+transition-all
+"
             >
               Export
             </button>
@@ -247,7 +318,7 @@ export default function DashboardPage() {
 
         {/* Stats */}
 
-        <div className="grid grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-5 mb-6">
           <StatCard title="Connections" value={stats.connections} />
 
           <StatCard title="Conversations" value={stats.conversations} />
@@ -368,7 +439,16 @@ export default function DashboardPage() {
 
         {/* Campaign Table */}
 
-        <div className="bg-white rounded-xl border p-6">
+        <div
+          className="
+bg-white
+rounded-[28px]
+border
+border-[#ececf4]
+p-8
+shadow-sm
+"
+        >
           <h2 className="font-semibold mb-4">
             Campaign Performance
             <div className="mt-6">
@@ -379,7 +459,7 @@ export default function DashboardPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left border-b">
+                <tr className="text-left border-b border-[#ececf4]">
                   <th className="pb-2">Campaign</th>
 
                   <th className="pb-2">Connections</th>
@@ -392,7 +472,15 @@ export default function DashboardPage() {
 
               <tbody>
                 {filteredPerformance.map((row, index) => (
-                  <tr key={index} className="border-b">
+                  <tr
+                    key={index}
+                    className="
+  border-b
+  border-[#f1f1f5]
+  hover:bg-[#fafafe]
+  transition-all
+"
+                  >
                     <td className="py-2">{row.campaign}</td>
 
                     <td>{row.connections}</td>
@@ -415,10 +503,31 @@ export default function DashboardPage() {
 
 function StatCard({ title, value }: any) {
   return (
-    <div className="border rounded-xl p-4">
-      <p className="text-sm text-gray-500">{title}</p>
+    <div
+      className="
+      bg-white
+      border
+      border-[#ececf4]
+      rounded-[24px]
+      p-6
+      hover:shadow-lg
+      transition-all
+      duration-300
+    "
+    >
+      <p className="text-sm text-gray-500 font-medium">{title}</p>
 
-      <h3 className="text-xl font-semibold">{value}</h3>
+      <h3
+        className="
+        text-4xl
+        font-bold
+        mt-3
+        tracking-tight
+        text-[#111827]
+      "
+      >
+        {value}
+      </h3>
     </div>
   );
 }
