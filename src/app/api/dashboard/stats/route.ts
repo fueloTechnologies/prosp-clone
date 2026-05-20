@@ -1,56 +1,42 @@
-import { NextResponse } from 'next/server'
-import prisma from '@/lib/prisma'
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
 export async function GET() {
-
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = session.user.id;
 
-    // Connections
-    const connections =
-      await prisma.contact.count()
+    const connections = await prisma.contact.count({ where: { userId } });
+    const conversations = await prisma.conversation.count({
+      where: { userId },
+    });
+    const engagements = await prisma.campaign.count({ where: { userId } });
+    const inmails = await prisma.message.count({ where: { userId } });
 
-    // Conversations
-    const conversations =
-      await prisma.conversation.count()
-
-    // Engagements
-    const engagements =
-      await prisma.campaign.count()
-
-    // InMails
-    const inmails =
-      await prisma.message.count()
-
-    // Tags
-    const contacts =
-      await prisma.contact.findMany({
-        select: { tags: true }
-      })
-
-    const uniqueTags =
-      new Set(
-        contacts.flatMap(c => c.tags)
-      )
-
-    const tags = uniqueTags.size
+    const contacts = await prisma.contact.findMany({
+      where: { userId },
+      select: { tags: true },
+    });
+    const uniqueTags = new Set(contacts.flatMap((c) => c.tags));
+    const tags = uniqueTags.size;
 
     return NextResponse.json({
       connections,
       conversations,
       engagements,
       inmails,
-      tags
-    })
-
+      tags,
+    });
   } catch (error) {
-
-    console.error(error)
-
+    console.error(error);
     return NextResponse.json(
-      { error: 'Failed to fetch stats' },
-      { status: 500 }
-    )
-
+      { error: "Failed to fetch stats" },
+      { status: 500 },
+    );
   }
-
 }

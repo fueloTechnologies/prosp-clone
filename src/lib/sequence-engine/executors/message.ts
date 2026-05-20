@@ -1,25 +1,16 @@
 import prisma from "@/lib/prisma";
 
-interface ExecuteMessageProps {
-  cc: any;
-  conversation: any;
-  userId: string;
-  step: any;
-  finalContent: string;
-}
-
 export async function executeMessage({
   cc,
   conversation,
   userId,
   step,
   finalContent,
-}: ExecuteMessageProps) {
+}: any) {
   try {
     console.log("💬 Sending message to:", cc.contact.firstName);
 
     const linkedInUrl = cc.contact.linkedInUrl || cc.contact.linkedinUrl;
-
     if (!linkedInUrl) {
       console.log("❌ No LinkedIn URL — skipping");
       return { success: false };
@@ -46,7 +37,7 @@ export async function executeMessage({
     await prisma.message.create({
       data: {
         conversationId: conversation.id,
-        userId: userId,
+        userId,
         direction: "SENT",
         content: finalContent,
       },

@@ -1,24 +1,30 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 
 export async function GET(request: Request) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = session.user.id;
+
     const { searchParams } = new URL(request.url);
     const time = searchParams.get("time") || "all";
-    const campaignId = searchParams.get("campaignId"); // ✅
+    const campaignId = searchParams.get("campaignId");
 
     const now = new Date();
     const startDate = new Date();
-    if (time === "month") {
-      startDate.setMonth(now.getMonth() - 1);
-    } else {
-      startDate.setDate(now.getDate() - 7);
-    }
+    if (time === "month") startDate.setMonth(now.getMonth() - 1);
+    else startDate.setDate(now.getDate() - 7);
 
     const conversations = await prisma.conversation.findMany({
       where: {
+        userId, // ✅ scoped to user
         createdAt: { gte: startDate },
-        ...(campaignId ? { campaignId } : {}), // ✅
+        ...(campaignId ? { campaignId } : {}),
       },
       select: { createdAt: true },
       orderBy: { createdAt: "asc" },
@@ -32,7 +38,6 @@ export async function GET(request: Request) {
       const key = d.toLocaleDateString("en-US", { weekday: "short" });
       grouped[key] = 0;
     }
-
     for (const conv of conversations) {
       const key = new Date(conv.createdAt).toLocaleDateString("en-US", {
         weekday: "short",

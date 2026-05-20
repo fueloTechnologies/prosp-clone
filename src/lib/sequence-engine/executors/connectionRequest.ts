@@ -1,31 +1,22 @@
 import prisma from "@/lib/prisma";
 
-interface ExecuteConnectionRequestProps {
-  cc: any;
-  conversation: any;
-  userId: string;
-  step: any;
-}
-
 export async function executeConnectionRequest({
   cc,
   conversation,
   userId,
   step,
-}: ExecuteConnectionRequestProps) {
+  finalContent,
+}: any) {
   try {
-    console.log("🔗 Sending LinkedIn request to:", cc.contact.firstName);
+    console.log("🔗 Sending connection request to:", cc.contact.firstName);
 
-    // FIX: schema uses linkedInUrl (capital I and N)
     const linkedInUrl = cc.contact.linkedInUrl || cc.contact.linkedinUrl;
-
-    console.log("LinkedIn URL:", linkedInUrl);
-
     if (!linkedInUrl) {
       console.log("❌ No LinkedIn URL — skipping");
       return { success: false };
     }
 
+    // Queue connection request for extension to pick up
     const response = await fetch(
       "http://localhost:3000/api/extension/connect",
       {
@@ -33,26 +24,30 @@ export async function executeConnectionRequest({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           linkedinUrl: linkedInUrl,
-          message: step.content || "",
+          message: finalContent || step.content || "",
+          action: "connection_request",
         }),
       },
     );
 
-    const data = await response.json();
-    console.log("✅ Extension response:", data);
+    if (!response.ok) {
+      console.error("❌ Extension API error:", response.status);
+      return { success: false };
+    }
 
     await prisma.message.create({
       data: {
         conversationId: conversation.id,
-        userId: userId,
+        userId,
         direction: "SENT",
-        content: step.content || "Connection request sent",
+        content: finalContent || step.content || "Connection request sent",
       },
     });
 
+    console.log("✅ Connection request queued");
     return { success: true };
   } catch (error) {
-    console.error("❌ LinkedIn connect failed:", error);
+    console.error("❌ Connection request failed:", error);
     return { success: false };
   }
 }

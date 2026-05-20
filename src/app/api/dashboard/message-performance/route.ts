@@ -1,44 +1,37 @@
-import { NextResponse } from 'next/server'
-import prisma from '@/lib/prisma'
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
 export async function GET() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = session.user.id;
 
-  // Get all campaigns
-  const campaigns = await prisma.campaign.findMany()
+  const campaigns = await prisma.campaign.findMany({ where: { userId } });
 
-  let messagesSent = 0
-  let replies = 0
+  let messagesSent = 0,
+    replies = 0;
 
-  campaigns.forEach(c => {
+  campaigns.forEach((c) => {
+    messagesSent += c.sentCount || 0;
+    replies += c.replyCount || 0;
+  });
 
-    messagesSent += c.sentCount || 0
-    replies += c.replyCount || 0
-
-  })
-
-  // Demo sentiment split
-  const positiveReplies = Math.floor(replies * 0.6)
-  const negativeReplies = replies - positiveReplies
-
+  const positiveReplies = Math.floor(replies * 0.6);
+  const negativeReplies = replies - positiveReplies;
   const replyRate =
-    messagesSent > 0
-      ? Math.round((replies / messagesSent) * 100)
-      : 0
-
+    messagesSent > 0 ? Math.round((replies / messagesSent) * 100) : 0;
   const positiveRate =
-    messagesSent > 0
-      ? Math.round((positiveReplies / messagesSent) * 100)
-      : 0
+    messagesSent > 0 ? Math.round((positiveReplies / messagesSent) * 100) : 0;
 
   return NextResponse.json({
-
     messagesSent,
     replies,
     positiveReplies,
     negativeReplies,
     replyRate,
-    positiveRate
-
-  })
-
+    positiveRate,
+  });
 }

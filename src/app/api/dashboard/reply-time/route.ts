@@ -1,56 +1,45 @@
-import { NextResponse } from 'next/server'
-import prisma from '@/lib/prisma'
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
 export async function GET() {
   try {
-    const conversations = await prisma.conversation.findMany({
-      include: {
-       messages: {
-  orderBy: {
-    id: 'asc',
-  },
-},
-      },
-    })
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id)
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const userId = session.user.id;
 
-    let totalReplyTime = 0
-    let replyCount = 0
+    const conversations = await prisma.conversation.findMany({
+      where: { userId },
+      include: { messages: { orderBy: { id: "asc" } } },
+    });
+
+    let totalReplyTime = 0,
+      replyCount = 0;
 
     conversations.forEach((conversation: any) => {
-      const messages: any[] = conversation.messages
-
+      const messages: any[] = conversation.messages;
       for (let i = 1; i < messages.length; i++) {
-        const previous = messages[i - 1]
-        const current = messages[i]
-
         const timeDiff =
-          new Date(current.createdAt).getTime() -
-          new Date(previous.createdAt).getTime()
-
-        const minutes = Math.floor(timeDiff / (1000 * 60))
-
+          new Date(messages[i].createdAt).getTime() -
+          new Date(messages[i - 1].createdAt).getTime();
+        const minutes = Math.floor(timeDiff / (1000 * 60));
         if (minutes > 0) {
-          totalReplyTime += minutes
-          replyCount++
+          totalReplyTime += minutes;
+          replyCount++;
         }
       }
-    })
+    });
 
     const averageReplyTime =
-      replyCount > 0
-        ? Math.floor(totalReplyTime / replyCount)
-        : 0
-
-    return NextResponse.json({
-      averageReplyTime,
-      replyCount,
-    })
+      replyCount > 0 ? Math.floor(totalReplyTime / replyCount) : 0;
+    return NextResponse.json({ averageReplyTime, replyCount });
   } catch (error) {
-    console.error('Reply Time Error:', error)
-
+    console.error("Reply Time Error:", error);
     return NextResponse.json(
-      { error: 'Failed to load reply time' },
-      { status: 500 }
-    )
+      { error: "Failed to load reply time" },
+      { status: 500 },
+    );
   }
 }

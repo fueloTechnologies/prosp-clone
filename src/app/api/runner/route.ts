@@ -5,97 +5,76 @@ import { stepExecutors } from "@/lib/sequence-engine/executors";
 let isRunnerRunning = false;
 
 function personalize(content: string, contact: any) {
+  // Clean each field before substituting
+  const firstName = (contact.firstName || "").split(" ")[0].trim();
+  const lastName = (contact.lastName || "").trim();
+  const company = (contact.company || "").split("·")[0].split("|")[0].trim();
+  const position = (contact.position || "")
+    .split("·")[0]
+    .split("|")[0]
+    .split("—")[0]
+    .trim();
+
   return content
-    .replace(/{{firstName}}/g, contact.firstName || "")
-    .replace(/{{lastName}}/g, contact.lastName || "")
-    .replace(/{{company}}/g, contact.company || "")
-    .replace(/{{position}}/g, contact.position || "");
+    .replace(/{{firstName}}/g, firstName)
+    .replace(/{{lastName}}/g, lastName)
+    .replace(/{{company}}/g, company)
+    .replace(/{{position}}/g, position);
 }
 
 export async function GET() {
   try {
     if (isRunnerRunning) {
       console.log("⚠️ Runner already running");
-      return NextResponse.json({ success: false });
+      return NextResponse.json({ success: false, reason: "Already running" });
     }
 
     isRunnerRunning = true;
     console.log("🚀 Runner started");
 
-    const DAILY_LIMIT = 100;
     const now = new Date();
+    const DAILY_LIMIT = 100;
 
-    /* =========================
-       COUNT TODAY'S MESSAGES
-    ========================= */
-
+    // Count today's messages
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-
     const messagesSentToday = await prisma.message.count({
       where: { sentAt: { gte: startOfDay } },
     });
 
-    console.log("Messages sent today:", messagesSentToday);
-
     if (messagesSentToday >= DAILY_LIMIT) {
-      console.log("Daily limit reached — stopping runner");
+      console.log("Daily limit reached");
       isRunnerRunning = false;
       return NextResponse.json({
         success: true,
-        processed: 0,
         reason: "Daily limit reached",
       });
     }
 
-    /* =========================
-       FIND READY CONTACTS
-    ========================= */
-
+    // Find contacts ready to process
     const contacts = await prisma.campaignContact.findMany({
       where: {
         status: { in: ["PENDING", "IN_PROGRESS"] },
         OR: [{ nextSendAt: null }, { nextSendAt: { lte: now } }],
       },
-      include: {
-        campaign: true,
-        contact: true,
-      },
+      include: { campaign: true, contact: true },
       take: 10,
     });
 
     console.log("Ready contacts:", contacts.length);
 
     for (const cc of contacts) {
-      console.log("Processing contact:", cc.id);
+      console.log(
+        `\n📋 Processing contact: ${cc.contact.firstName} | step index: ${cc.currentStep}`,
+      );
 
-      const stepIndex = cc.currentStep;
-
-      const lastExecution = await prisma.campaignStepExecution.findFirst({
-        where: {
-          // @ts-ignore
-          campaignContactId: cc.id,
-        },
-        orderBy: {
-          executedAt: "desc",
-        },
-      }); /* =========================
-         GET STEP
-      ========================= */
-
+      // Get the current step (order = currentStep + 1 because order is 1-based)
       const step = await prisma.campaignStep.findFirst({
-        where: {
-          campaignId: cc.campaignId,
-          order: stepIndex + 1,
-        },
+        where: { campaignId: cc.campaignId, order: cc.currentStep + 1 },
       });
 
-      /* =========================
-         NO MORE STEPS
-      ========================= */
-
       if (!step) {
-        console.log("✅ Sequence completed for:", cc.id);
+        console.log("✅ No more steps — marking COMPLETED");
         await prisma.campaignContact.update({
           where: { id: cc.id },
           data: { status: "COMPLETED" },
@@ -103,92 +82,73 @@ export async function GET() {
         continue;
       }
 
-      console.log("Step found:", step.type, "order:", step.order);
+      console.log(`Step: ${step.type} (order ${step.order})`);
 
-      /* =========================
-   WAIT STEP
-========================= */
+      // Get last execution for this contact
+      const lastExecution = await prisma.campaignStepExecution.findFirst({
+        where: { campaignContactId: cc.id } as any,
+        orderBy: { executedAt: "desc" },
+      });
 
+      // ── WAIT STEP: check if delay period is over ──
       if (step.type === "WAIT") {
-        console.log("WAIT step detected");
-
         if (!lastExecution) {
+          console.log("⏳ WAIT: no previous execution yet — skipping");
           continue;
         }
-        const waitUntil = new Date((lastExecution as any).executedAt);
-        waitUntil.setHours(waitUntil.getHours() + (step.delay || 0));
 
-        console.log("Wait until:", waitUntil);
+        const waitHours = step.delay || 1;
+        const waitUntil = new Date(lastExecution.executedAt!);
+        waitUntil.setHours(waitUntil.getHours() + waitHours);
 
-        // still waiting
         if (new Date() < waitUntil) {
-          console.log(`Still waiting ${step.delay} hours`);
-
+          const mins = Math.round((waitUntil.getTime() - Date.now()) / 60000);
+          console.log(`⏳ WAIT: ${mins} minutes remaining`);
           continue;
         }
 
-        console.log("WAIT completed");
-
-        // move to next step
+        // Wait is done — advance to next step
+        console.log("✅ WAIT completed — advancing");
+        await prisma.campaignStepExecution.create({
+          data: {
+            campaignContactId: cc.id,
+            stepId: step.id,
+            status: "COMPLETED",
+            scheduledFor: new Date(),
+            executedAt: new Date(),
+          } as any,
+        });
         await prisma.campaignContact.update({
           where: { id: cc.id },
-          data: {
-            currentStep: stepIndex + 1,
-            status: "IN_PROGRESS",
-          },
+          data: { currentStep: cc.currentStep + 1, status: "IN_PROGRESS" },
         });
-
         continue;
       }
-      /* =========================
-         GET USER
-      ========================= */
 
+      // ── ALL OTHER STEPS: get campaign userId and conversation ──
       const campaign = await prisma.campaign.findUnique({
         where: { id: cc.campaignId },
       });
-
       if (!campaign) continue;
 
       const userId = campaign.userId;
 
-      /* =========================
-         FIND / CREATE CONVERSATION
-      ========================= */
-
       let conversation = await prisma.conversation.findFirst({
-        where: {
-          contactId: cc.contactId,
-          userId: userId,
-        },
+        where: { contactId: cc.contactId, userId },
       });
-
       if (!conversation) {
         conversation = await prisma.conversation.create({
-          data: {
-            userId: userId,
-            contactId: cc.contactId,
-          },
+          data: { userId, contactId: cc.contactId },
         });
       }
 
-      /* =========================
-         PERSONALIZE MESSAGE
-      ========================= */
-
       const finalContent = personalize(step.content || "", cc.contact);
+      console.log("Personalized content:", finalContent?.slice(0, 80));
 
-      console.log("Processing step type:", step.type);
-      console.log("Personalized content:", finalContent);
-
-      /* =========================
-         EXECUTOR
-      ========================= */
-
+      // ── Run executor ──
       const executor = stepExecutors[step.type as keyof typeof stepExecutors];
-
       if (!executor) {
-        console.log("No executor found for:", step.type);
+        console.log(`⚠️ No executor for step type: ${step.type}`);
         continue;
       }
 
@@ -197,22 +157,17 @@ export async function GET() {
         conversation,
         userId,
         step,
-        stepIndex,
+        stepIndex: cc.currentStep,
         lastExecution,
         finalContent,
       });
 
       if (!result.success) {
-        console.log("❌ Executor failed for:", step.type);
+        console.log(`❌ Executor failed for ${step.type}`);
         continue;
       }
 
-      /* =========================
-         CREATE EXECUTION
-      ========================= */
-
-      console.log("Creating execution for step:", step.id);
-
+      // ── Record execution ──
       await prisma.campaignStepExecution.create({
         data: {
           campaignContactId: cc.id,
@@ -223,42 +178,45 @@ export async function GET() {
         } as any,
       });
 
-      console.log("✅ Execution created successfully");
-
-      /* =========================
-         NEXT STEP
-      ========================= */
-
+      // ── Check if there's a next step ──
       const nextStep = await prisma.campaignStep.findFirst({
-        where: {
-          campaignId: cc.campaignId,
-          order: stepIndex + 2,
-        },
+        where: { campaignId: cc.campaignId, order: cc.currentStep + 2 },
       });
 
       if (!nextStep) {
-        console.log("✅ Sequence completed for:", cc.contact.firstName);
+        console.log(`✅ Sequence completed for: ${cc.contact.firstName}`);
         await prisma.campaignContact.update({
           where: { id: cc.id },
           data: { status: "COMPLETED" },
         });
       } else {
+        // If next step has a delay, set nextSendAt so we don't process too early
+        let nextSendAt = new Date();
+        if (nextStep.type === "WAIT") {
+          // WAIT step delay is handled by the wait executor — just advance immediately
+          nextSendAt = new Date();
+        } else if (nextStep.delay && nextStep.delay > 0) {
+          nextSendAt = new Date();
+          nextSendAt.setHours(nextSendAt.getHours() + nextStep.delay);
+        }
+
+        console.log(
+          `➡️ Advancing to step ${cc.currentStep + 2}, next run at: ${nextSendAt}`,
+        );
         await prisma.campaignContact.update({
           where: { id: cc.id },
           data: {
-            currentStep: stepIndex + 1,
+            currentStep: cc.currentStep + 1,
             status: "IN_PROGRESS",
+            nextSendAt,
           },
         });
       }
     }
 
     isRunnerRunning = false;
-
-    return NextResponse.json({
-      success: true,
-      processed: contacts.length,
-    });
+    console.log("✅ Runner finished");
+    return NextResponse.json({ success: true, processed: contacts.length });
   } catch (error) {
     console.error("RUNNER ERROR:", error);
     isRunnerRunning = false;

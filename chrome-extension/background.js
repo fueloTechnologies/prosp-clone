@@ -1,6 +1,5 @@
 console.log("✅ Prosp background service worker started");
 
-// Keep service worker alive
 const keepAlive = () =>
   setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
 chrome.runtime.onStartup.addListener(keepAlive);
@@ -8,36 +7,35 @@ keepAlive();
 
 const API_KEY = "prosp-extension-secret-123";
 
-// ============================
-// WATCH chrome.storage FOR NEW CONTACTS
-// ============================
+// ── Watch chrome.storage for new contacts ──
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-
   for (const key of Object.keys(changes)) {
     if (!key.startsWith("pending_contact_")) continue;
-
     const payload = changes[key].newValue;
     if (!payload) continue;
-
-    console.log("📦 New contact detected in storage:", payload.fullName);
-
+    console.log(
+      "📦 New contact detected:",
+      payload.fullName,
+      "| user:",
+      payload.userEmail,
+    );
     if (
       !payload.firstName ||
       payload.firstName === "Unknown" ||
       !payload.linkedinUrl ||
       payload.linkedinUrl === "https://www.linkedin.com/"
     ) {
-      console.log("⚠️ Invalid contact — skipping:", payload.firstName);
+      console.log("⚠️ Invalid contact — skipping");
       chrome.storage.local.remove(key);
       continue;
     }
-
     saveContactToAPI(key, payload);
   }
 });
 
 function saveContactToAPI(key, payload, retries = 3) {
+  console.log("📤 Sending to API — userEmail:", payload.userEmail);
   fetch("http://localhost:3000/api/contacts/save", {
     method: "POST",
     headers: {
@@ -53,6 +51,7 @@ function saveContactToAPI(key, payload, retries = 3) {
       linkedinUrl: payload.linkedinUrl || "",
       location: payload.location || "",
       avatar: payload.avatar || "",
+      userEmail: payload.userEmail || null, // ✅ CRITICAL
     }),
   })
     .then((res) => {
@@ -60,30 +59,53 @@ function saveContactToAPI(key, payload, retries = 3) {
       return res.json();
     })
     .then((data) => {
-      console.log("✅ Contact saved to DB:", data);
+      console.log("✅ Contact saved to DB:", data.firstName, data.lastName);
       chrome.storage.local.remove(key);
     })
     .catch((err) => {
       console.error("❌ Save failed:", err.message);
       if (retries > 0) {
-        console.log(`🔄 Retrying... (${retries} left)`);
         setTimeout(() => saveContactToAPI(key, payload, retries - 1), 2000);
-      } else {
-        console.error("❌ All retries failed for:", payload.fullName);
       }
     });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 🔧 DEBUG CLICK HANDLER
+  // ✅ NEW: sync user email — background can hit localhost, content scripts can't
+  if (message.action === "sync_user_email") {
+    fetch("http://localhost:3000/api/auth/session-sync", {
+      method: "GET",
+      credentials: "include",
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Status " + res.status);
+        return res.json();
+      })
+      .then((data) => {
+        if (data.email) {
+          chrome.storage.local.set({ prosp_user_email: data.email }, () => {
+            console.log("✅ User email stored:", data.email);
+          });
+          sendResponse({ email: data.email });
+        } else {
+          console.warn("⚠️ No email in session-sync response");
+          sendResponse({ email: null });
+        }
+      })
+      .catch((err) => {
+        console.warn("⚠️ session-sync fetch failed:", err.message);
+        sendResponse({ email: null });
+      });
+    return true; // async response
+  }
+
+  // Debugger click
   if (message.action === "click_at_coords") {
     const tabId = sender.tab.id;
-
     chrome.debugger.attach({ tabId }, "1.3", () => {
       if (chrome.runtime.lastError) {
         console.log("Debugger error:", chrome.runtime.lastError.message);
       }
-
       setTimeout(() => {
         chrome.debugger.sendCommand(
           { tabId },
@@ -115,39 +137,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         );
       }, 500);
     });
-
     return true;
   }
 
-  // 🚀 EXECUTE CONNECTION REQUEST
+  // Execute connection request
   if (message.action === "execute_connection_request") {
-    console.log("🚀 Executing LinkedIn connect:", message.linkedinUrl);
-
     chrome.tabs.create({ url: message.linkedinUrl, active: true }, (tab) => {
-      console.log("✅ LinkedIn tab opened");
-
       setTimeout(() => {
         chrome.tabs.sendMessage(
           tab.id,
-          {
-            action: "connect",
-            message: message.message,
-          },
+          { action: "connect", message: message.message },
           (response) => {
             console.log("✅ Connect trigger sent:", response);
           },
         );
       }, 8000);
     });
-
     sendResponse({ success: true });
     return true;
   }
 });
 
-/* ============================
-   POLL BACKEND FOR TASKS
-============================= */
+// Poll backend for tasks
 async function pollTasks() {
   try {
     const response = await fetch(
@@ -156,51 +167,27 @@ async function pollTasks() {
         headers: { "x-api-key": API_KEY },
       },
     );
-
-    if (!response.ok) {
-      console.warn("⚠️ Poll response not OK:", response.status);
-      return;
-    }
-
+    if (!response.ok) return;
     const data = await response.json();
-
     if (!data.task) return;
-
     console.log("📥 Task received:", data.task);
-
     if (data.task.action === "execute_connection_request") {
       chrome.tabs.create(
         { url: data.task.linkedinUrl, active: true },
         (tab) => {
-          console.log("✅ LinkedIn tab opened for campaign task");
-
           setTimeout(() => {
             chrome.tabs.sendMessage(
               tab.id,
-              {
-                action: "connect",
-                message: data.task.message,
-              },
-              (response) => {
-                console.log("✅ Connect trigger sent:", response);
-
+              { action: "connect", message: data.task.message },
+              () => {
                 fetch("http://localhost:3000/api/extension/connect", {
                   method: "PUT",
                   headers: {
                     "Content-Type": "application/json",
                     "x-api-key": API_KEY,
                   },
-                  body: JSON.stringify({
-                    taskId: data.task.id,
-                    success: true,
-                  }),
-                })
-                  .then(() => {
-                    console.log("✅ Task completion reported:", data.task.id);
-                  })
-                  .catch((err) => {
-                    console.error("❌ Report failed:", err);
-                  });
+                  body: JSON.stringify({ taskId: data.task.id, success: true }),
+                });
               },
             );
           }, 8000);

@@ -147,80 +147,101 @@ function extractHeadlineFromCard(card) {
    Scoped to current profile — ignores sidebar buttons
 ============================= */
 function findMainConnectButton() {
-  const firstName = window.currentFirstName || "";
-  const fullTitle = document.title.split("|")[0].trim(); // e.g. "Raja Patel"
+  let fullName = "";
+  try {
+    fullName = document.title.replace(/\s*[\|\-]\s*(LinkedIn.*)?$/i, "").trim();
+  } catch (e) {}
 
-  // 1. Try exact aria-label match with full name (most reliable)
-  if (fullTitle) {
-    const exact = document.querySelector(
-      `button[aria-label="Invite ${fullTitle} to connect"]`,
-    );
-    if (exact) {
-      console.log("✅ Found by full name aria-label");
-      return exact;
-    }
-  }
+  console.log("🔍 Looking for Connect button for:", `"${fullName}"`);
 
-  // 2. Try first name match in aria-label
-  if (firstName) {
-    const byFirst = Array.from(document.querySelectorAll("button")).find(
-      (b) => {
-        const label = b.getAttribute("aria-label") || "";
-        return (
-          label.includes(`Invite ${firstName}`) && label.includes("connect")
-        );
-      },
-    );
-    if (byFirst) {
-      console.log("✅ Found by first name aria-label");
-      return byFirst;
-    }
-  }
+  const mainEl = document.querySelector("main");
+  if (!mainEl) return null;
 
-  // 3. Try generic Connect aria-label (excludes sidebar "Invite X to connect" buttons)
-  const genericConnect = document.querySelector('button[aria-label="Connect"]');
-  if (genericConnect) {
-    console.log("✅ Found generic Connect");
-    return genericConnect;
-  }
+  // ── Profile card buttons: left < 700px (sidebar is always ~1092px) ──
+  const profileCardButtons = Array.from(mainEl.querySelectorAll("button"))
+    .filter((b) => b.offsetParent !== null)
+    .filter((b) => b.getBoundingClientRect().left < 700);
 
-  // 4. Find Connect button inside main profile section only (not sidebar)
-  const mainSection = document.querySelector("main");
-  if (mainSection) {
-    // Look for button with text "Connect" that is NOT inside a pymk/sidebar card
-    const btn = Array.from(mainSection.querySelectorAll("button")).find((b) => {
-      const text = b.innerText?.trim();
-      const label = b.getAttribute("aria-label") || "";
-      const inSidebar =
-        b.closest('[data-view-name="pymk-card"]') ||
-        b.closest(".scaffold-finite-scroll__content aside") ||
-        b.closest('[data-view-name="cohort-card"]');
-      return (
-        !inSidebar &&
-        (text === "Connect" || label.toLowerCase().includes("connect"))
-      );
-    });
-    if (btn) {
-      console.log("✅ Found in main section");
-      return btn;
-    }
-  }
-
-  // 5. Last resort — find the FIRST Connect button whose aria-label matches current page person
-  const allConnectBtns = Array.from(document.querySelectorAll("button")).filter(
-    (b) => b.innerText?.trim() === "Connect",
-  );
-  // Filter out sidebar buttons (they have specific aria-labels with other people's names)
-  const profileBtn = allConnectBtns.find((b) => {
-    const label = b.getAttribute("aria-label") || "";
-    // If no aria-label, it's likely the main profile button
-    if (!label) return true;
-    // If aria-label contains current profile name, use it
-    if (firstName && label.includes(firstName)) return true;
-    return false;
+  // Strategy 1: Direct Connect button visible in profile card
+  const directConnect = profileCardButtons.find((b) => {
+    const text = b.innerText?.trim();
+    const aria = (b.getAttribute("aria-label") || "").toLowerCase();
+    return text === "Connect" || aria.includes("connect");
   });
 
-  return profileBtn || null;
+  if (directConnect) {
+    console.log("✅ Found direct Connect button");
+    return directConnect;
+  }
+
+  // Strategy 2: Connect hidden behind More button — click More, find span
+  const moreBtn = profileCardButtons.find((b) => {
+    const text = b.innerText?.trim();
+    const aria = b.getAttribute("aria-label");
+    return (text === "More" || text?.includes("More")) && !aria;
+  });
+
+  if (moreBtn) {
+    console.log("🔍 Clicking More to reveal Connect...");
+    moreBtn.click();
+
+    return new Promise((resolve) => {
+      let tries = 0;
+      const interval = setInterval(() => {
+        tries++;
+
+        // ✅ KEY FIX: Connect is a SPAN — find it then get its parent button
+        const allSpans = Array.from(document.querySelectorAll("span")).filter(
+          (s) =>
+            s.children.length === 0 &&
+            s.innerText?.trim() === "Connect" &&
+            s.offsetParent !== null,
+        );
+
+        for (const span of allSpans) {
+          // Walk up to find the button parent
+          let el = span.parentElement;
+          let depth = 0;
+          while (el && depth < 8) {
+            if (el.tagName === "BUTTON") {
+              // Make sure this button is NOT a sidebar button
+              const left = el.getBoundingClientRect().left;
+              if (left < 700) {
+                clearInterval(interval);
+                console.log(
+                  "✅ Found Connect span → button in dropdown, left:",
+                  left,
+                );
+                resolve(el);
+                return;
+              }
+            }
+            if (el.tagName === "A") {
+              // Some dropdown items are <a> tags not buttons
+              const left = el.getBoundingClientRect().left;
+              if (left < 700) {
+                clearInterval(interval);
+                console.log("✅ Found Connect span → link in dropdown");
+                resolve(el);
+                return;
+              }
+            }
+            el = el.parentElement;
+            depth++;
+          }
+        }
+
+        if (tries > 15) {
+          clearInterval(interval);
+          console.log("❌ Connect not found in dropdown after More click");
+          resolve(null);
+        }
+      }, 400);
+    });
+  }
+
+  console.log("❌ Connect button not found");
+  return null;
 }
 
 /* ============================
@@ -229,48 +250,47 @@ function findMainConnectButton() {
 function clickConnectButton() {
   console.log("Searching MAIN profile Connect button...");
 
-  // Capture name from title (most reliable on LinkedIn)
   try {
-    let fullName = document.title.split("|")[0].trim();
-    if (fullName && !fullName.toLowerCase().includes("linkedin")) {
-      const firstName = fullName.split(" ")[0];
+    let fullName = document.title
+      .replace(/\s*[\|\-]\s*(LinkedIn.*)?$/i, "")
+      .trim();
+    if (fullName && fullName.length > 1) {
+      window.currentFirstName = fullName.split(" ")[0];
       window.currentFirstName =
-        firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+        window.currentFirstName.charAt(0).toUpperCase() +
+        window.currentFirstName.slice(1).toLowerCase();
       console.log("👤 Profile name captured:", window.currentFirstName);
-    } else {
-      // fallback to h1
-      const h1 = document.querySelector("h1");
-      if (h1) {
-        const name = h1.innerText.trim().split(" ")[0];
-        window.currentFirstName =
-          name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-      }
     }
-  } catch (err) {
-    console.log("⚠️ Name capture failed", err);
-  }
+  } catch (err) {}
 
-  const connectBtn = findMainConnectButton();
+  let attempts = 0;
+  const maxAttempts = 20;
 
-  if (connectBtn) {
-    console.log("✅ MAIN Connect FOUND — clicking");
-    connectBtn.click();
-    // Save contact immediately when connect is clicked (don't wait for modal)
-    setTimeout(() => {
-      saveContactToDatabase("", window.location.href);
-    }, 1000);
-    setTimeout(() => {
-      clickAddNote();
-    }, 2000);
-  } else {
-    console.log("❌ MAIN Connect not found");
-    // Still save the contact even if connect button not found
-    saveContactToDatabase("", window.location.href);
-  }
+  const tryFind = () => {
+    attempts++;
+    const result = findMainConnectButton();
+
+    Promise.resolve(result).then((connectBtn) => {
+      if (connectBtn) {
+        console.log("✅ MAIN Connect FOUND — clicking");
+        connectBtn.click();
+        setTimeout(() => saveContactToDatabase("", window.location.href), 1000);
+        setTimeout(() => clickAddNote(), 2500);
+      } else if (attempts < maxAttempts) {
+        setTimeout(tryFind, 500);
+      } else {
+        console.log(
+          "❌ MAIN Connect not found after retries — saving contact anyway",
+        );
+        saveContactToDatabase("", window.location.href);
+      }
+    });
+  };
+
+  tryFind();
 }
 
 window.clickConnectButton = clickConnectButton;
-
 /* ============================
    MESSAGE LISTENER
 ============================= */
@@ -519,9 +539,13 @@ function clickAddNote() {
       console.log("✅ Send without note FOUND — clicking");
       clearInterval(interval);
       sendWithoutBtn.click();
-      sentCount++;
-      index++;
-      console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
+      if (isBulkMode) {
+        sentCount++;
+        index++;
+        console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
+      } else {
+        console.log(`✅ Single connect sent!`);
+      }
       afterSend();
       return;
     }
@@ -550,9 +574,13 @@ function clickAddNote() {
         console.log("✅ Send in shadow DOM");
         clearInterval(interval);
         shadowSend.click();
-        sentCount++;
-        index++;
-        console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
+        if (isBulkMode) {
+          sentCount++;
+          index++;
+          console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
+        } else {
+          console.log(`✅ Single connect sent!`);
+        }
         afterSend();
         return;
       }
@@ -652,9 +680,13 @@ function clickSend() {
       console.log("✅ Send FOUND in DOM");
       clearInterval(interval);
       sendBtn.click();
-      sentCount++;
-      index++;
-      console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
+      if (isBulkMode) {
+        sentCount++;
+        index++;
+        console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
+      } else {
+        console.log(`✅ Single connect sent!`);
+      }
       afterSend();
       return;
     }
@@ -674,9 +706,13 @@ function clickSend() {
         console.log("✅ Send FOUND in shadow DOM");
         clearInterval(interval);
         shadowSend.click();
-        sentCount++;
-        index++;
-        console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
+        if (isBulkMode) {
+          sentCount++;
+          index++;
+          console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
+        } else {
+          console.log(`✅ Single connect sent!`);
+        }
         afterSend();
         return;
       }
@@ -930,6 +966,7 @@ async function saveContactToDatabase(name, profileUrl) {
       company,
       location,
       avatar,
+      userEmail: "",
     };
 
     console.log("🚀 Preparing to save:", payload);

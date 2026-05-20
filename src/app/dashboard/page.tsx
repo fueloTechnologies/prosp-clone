@@ -24,6 +24,7 @@ import ReplyTimeWidget from "@/components/dashboard/ReplyTimeWidget";
 import CampaignAlerts from "@/components/dashboard/CampaignAlerts";
 import CampaignTimeline from "@/components/dashboard/CampaignTimeline";
 import AIKPIWidget from "@/components/dashboard/AIKPIWidget";
+import OnboardingCard from "@/components/dashboard/OnboardingCard";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
@@ -137,7 +138,6 @@ export default function DashboardPage() {
   return (
     <AppShell activeTab="dashboard">
       {/* LinkedIn Section */}
-
       <div className="bg-white border rounded-xl p-6 mb-6">
         <h2 className="text-lg font-semibold">
           Let's get started {user?.name || "User"} 👋
@@ -183,9 +183,7 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
-
       {/* Analytics Section — MOVED INSIDE */}
-
       <div className="px-2 md:px-6">
         {/* Header */}
 

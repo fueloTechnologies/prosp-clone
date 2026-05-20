@@ -31,13 +31,13 @@ export async function POST(req: Request) {
     let userId: string;
 
     if (isExtension) {
-      // Extension saves — use first user in DB
-      const user = await prisma.user.findFirst({
-        orderBy: { createdAt: "asc" },
+      const user = await prisma.user.findUnique({
+        where: { email: body.userEmail },
       });
       if (!user) {
+        console.error("❌ No user found for email:", body.userEmail);
         return NextResponse.json(
-          { error: "No user found" },
+          { error: `No user found for email: ${body.userEmail}` },
           { status: 404, headers: CORS_HEADERS },
         );
       }

@@ -10,7 +10,7 @@ export async function POST(
     const campaignId = params.id;
     const now = new Date();
 
-    console.log("Launching campaign:", campaignId);
+    console.log("🚀 Launching campaign:", campaignId);
 
     await prisma.campaign.update({
       where: { id: campaignId },
@@ -18,13 +18,18 @@ export async function POST(
     });
 
     await prisma.campaignContact.updateMany({
-      where: { campaignId: campaignId },
+      where: { campaignId },
       data: {
         status: "IN_PROGRESS",
         currentStep: 0,
         nextSendAt: now,
       },
     });
+
+    // ✅ Trigger runner immediately so first step runs right away
+    fetch("http://localhost:3000/api/runner").catch((err) =>
+      console.error("Runner trigger failed:", err),
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

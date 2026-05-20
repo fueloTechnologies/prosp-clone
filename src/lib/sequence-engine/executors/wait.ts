@@ -1,68 +1,23 @@
-import prisma from '@/lib/prisma'
-
-interface ExecuteWaitProps {
-  cc: any
-  step: any
-  stepIndex: number
-  lastExecution: any
-}
-
-export async function executeWait({
-
-  cc,
-  step,
-  stepIndex,
-  lastExecution
-
-}: ExecuteWaitProps) {
-
-  console.log(
-    "⏳ WAIT step detected"
-  )
+export async function executeWait({ cc, step, lastExecution }: any) {
+  console.log("⏳ WAIT step — checking if wait period is over");
 
   if (!lastExecution?.executedAt) {
-
-    console.log(
-      "No previous execution found"
-    )
-
-    return {
-      success: false
-    }
-
+    console.log("⏳ No previous execution — waiting");
+    return { success: false, waiting: true };
   }
 
-  const waitUntil =
-    new Date(lastExecution.executedAt)
-
-  waitUntil.setHours(
-    waitUntil.getHours() + step.delay
-  )
-
-  console.log(
-    "Wait until:",
-    waitUntil
-  )
+  const waitHours = step.delay || 1;
+  const waitUntil = new Date(lastExecution.executedAt);
+  waitUntil.setHours(waitUntil.getHours() + waitHours);
 
   if (new Date() < waitUntil) {
-
-    console.log(
-      "⏳ Still waiting..."
-    )
-
-    return {
-      success: false,
-      waiting: true
-    }
-
+    const remaining = Math.round(
+      (waitUntil.getTime() - Date.now()) / 1000 / 60,
+    );
+    console.log(`⏳ Still waiting — ${remaining} minutes remaining`);
+    return { success: false, waiting: true };
   }
 
-  console.log(
-    "✅ WAIT completed"
-  )
-
-  return {
-    success: true
-  }
-
+  console.log("✅ WAIT period completed");
+  return { success: true };
 }

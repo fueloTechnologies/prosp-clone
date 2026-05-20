@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export default function OnboardingCard() {
+export default function OnboardingCard({ user }: any) {
   const [linkedinConnected, setLinkedinConnected] = useState(false);
 
   const [campaignCreated, setCampaignCreated] = useState(true); // you already created campaigns
@@ -23,7 +23,7 @@ export default function OnboardingCard() {
 
           <div>
             <h2 className="font-semibold text-lg">
-              Let's get started Tejeshwar 👋
+              Let's get started {user?.name || "User"} 👋
             </h2>
 
             <p className="text-sm text-gray-500">
