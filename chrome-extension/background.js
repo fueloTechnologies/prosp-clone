@@ -1,11 +1,13 @@
 console.log("✅ Prosp background service worker started");
 
+// ── Config — change this to your production URL when deployed ──
+const APP_URL = "https://prosp-clone-xbwu.vercel.app";
+const API_KEY = "prosp-extension-secret-123";
+
 const keepAlive = () =>
   setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
 chrome.runtime.onStartup.addListener(keepAlive);
 keepAlive();
-
-const API_KEY = "prosp-extension-secret-123";
 
 // ── Watch chrome.storage for new contacts ──
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -36,7 +38,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 function saveContactToAPI(key, payload, retries = 3) {
   console.log("📤 Sending to API — userEmail:", payload.userEmail);
-  fetch("http://localhost:3000/api/contacts/save", {
+  fetch(`${APP_URL}/api/contacts/save`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -51,7 +53,7 @@ function saveContactToAPI(key, payload, retries = 3) {
       linkedinUrl: payload.linkedinUrl || "",
       location: payload.location || "",
       avatar: payload.avatar || "",
-      userEmail: payload.userEmail || null, // ✅ CRITICAL
+      userEmail: payload.userEmail || null,
     }),
   })
     .then((res) => {
@@ -71,9 +73,8 @@ function saveContactToAPI(key, payload, retries = 3) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // ✅ NEW: sync user email — background can hit localhost, content scripts can't
   if (message.action === "sync_user_email") {
-    fetch("http://localhost:3000/api/auth/session-sync", {
+    fetch(`${APP_URL}/api/auth/session-sync`, {
       method: "GET",
       credentials: "include",
     })
@@ -88,18 +89,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
           sendResponse({ email: data.email });
         } else {
-          console.warn("⚠️ No email in session-sync response");
           sendResponse({ email: null });
         }
       })
       .catch((err) => {
-        console.warn("⚠️ session-sync fetch failed:", err.message);
+        console.warn("⚠️ session-sync failed:", err.message);
         sendResponse({ email: null });
       });
-    return true; // async response
+    return true;
   }
 
-  // Debugger click
   if (message.action === "click_at_coords") {
     const tabId = sender.tab.id;
     chrome.debugger.attach({ tabId }, "1.3", () => {
@@ -140,7 +139,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Execute connection request
   if (message.action === "execute_connection_request") {
     chrome.tabs.create({ url: message.linkedinUrl, active: true }, (tab) => {
       setTimeout(() => {
@@ -156,17 +154,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
     return true;
   }
+
+  // ── Extension status ping — used by settings page to detect extension ──
+  if (message.action === "ping") {
+    sendResponse({ pong: true, version: "1.0" });
+    return true;
+  }
 });
 
-// Poll backend for tasks
 async function pollTasks() {
   try {
-    const response = await fetch(
-      "http://localhost:3000/api/extension/connect",
-      {
-        headers: { "x-api-key": API_KEY },
-      },
-    );
+    const response = await fetch(`${APP_URL}/api/extension/connect`, {
+      headers: { "x-api-key": API_KEY },
+    });
     if (!response.ok) return;
     const data = await response.json();
     if (!data.task) return;
@@ -180,7 +180,7 @@ async function pollTasks() {
               tab.id,
               { action: "connect", message: data.task.message },
               () => {
-                fetch("http://localhost:3000/api/extension/connect", {
+                fetch(`${APP_URL}/api/extension/connect`, {
                   method: "PUT",
                   headers: {
                     "Content-Type": "application/json",

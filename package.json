@@ -36,6 +36,7 @@
     "next-auth": "^4.24.7",
     "node-cron": "^4.2.1",
     "openai": "^4.28.0",
+    "puppeteer": "^25.0.4",
     "react": "^18",
     "react-beautiful-dnd": "^13.1.1",
     "react-dom": "^18",

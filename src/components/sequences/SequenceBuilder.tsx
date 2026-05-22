@@ -334,14 +334,16 @@ export default function SequenceBuilder({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
+    <div className="flex-1 overflow-y-auto bg-[#fafafe] p-8">
       {/* HEADER */}
 
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h2 className="text-lg font-semibold">{campaign?.name}</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-gray-900">
+            {campaign?.name}
+          </h2>
 
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 mt-1">
             {campaignContacts.length} contacts
           </p>
         </div>
@@ -349,7 +351,17 @@ export default function SequenceBuilder({
         <div className="flex gap-2">
           <button
             onClick={() => setAddingContacts(true)}
-            className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+            className="
+    h-11
+    px-5
+    rounded-2xl
+    border
+    border-[#ececf4]
+    bg-white
+    hover:bg-[#fafafe]
+    transition-all
+    font-medium
+  "
           >
             Add Contacts
           </button>
@@ -358,14 +370,38 @@ export default function SequenceBuilder({
 
           <button
             onClick={() => setShowSettings(true)}
-            className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+            className="
+  h-11
+  px-5
+  rounded-2xl
+  border
+  border-[#ececf4]
+  bg-white
+  hover:bg-[#fafafe]
+  transition-all
+  font-medium
+"
           >
             ⚙ Settings
           </button>
 
           <button
             onClick={launchCampaign}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+            className="
+  h-11
+  px-5
+  rounded-2xl
+  bg-gradient-to-r
+  from-violet-500
+  to-fuchsia-500
+  text-white
+  font-semibold
+  shadow-lg
+  shadow-violet-500/20
+  hover:scale-[1.02]
+  transition-all
+  duration-200
+"
           >
             🚀 Launch Campaign
           </button>

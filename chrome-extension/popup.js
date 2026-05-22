@@ -1,15 +1,29 @@
-console.log("Popup loaded");
+const APP_URL = "https://prosp-clone-xbwu.vercel.app";
 
 document.addEventListener("DOMContentLoaded", () => {
+  const statusDot = document.getElementById("statusDot");
+  const statusText = document.getElementById("statusText");
+
+  // Check if we're on LinkedIn
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs[0];
+    const isLinkedIn = tab?.url?.includes("linkedin.com");
+
+    if (isLinkedIn) {
+      statusDot.classList.remove("inactive");
+      statusText.textContent = "Active on LinkedIn";
+    } else {
+      statusDot.classList.add("inactive");
+      statusText.textContent = "Open LinkedIn to use";
+    }
+  });
+
   // Single Connect
-  const connectBtn = document.getElementById("connectBtn");
-  connectBtn.addEventListener("click", () => {
-    console.log("Single Connect triggered");
+  document.getElementById("connectBtn").addEventListener("click", () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs[0]) return;
       chrome.tabs.sendMessage(tabs[0].id, { action: "connect" }, (response) => {
         if (chrome.runtime.lastError) {
-          console.error("❌ Error:", chrome.runtime.lastError.message);
           chrome.scripting.executeScript({
             target: { tabId: tabs[0].id },
             func: () => {
@@ -17,17 +31,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 clickConnectButton();
             },
           });
-        } else {
-          console.log("✅ Response:", response);
         }
       });
     });
+    window.close();
   });
 
   // Bulk Connect
-  const bulkBtn = document.getElementById("bulkConnectBtn");
-  bulkBtn.addEventListener("click", () => {
-    console.log("Bulk Connect triggered");
+  document.getElementById("bulkConnectBtn").addEventListener("click", () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs[0]) return;
       chrome.tabs.sendMessage(
@@ -35,27 +46,36 @@ document.addEventListener("DOMContentLoaded", () => {
         { action: "start_bulk_connect" },
         (response) => {
           if (chrome.runtime.lastError) {
-            console.error(
-              "❌ sendMessage failed:",
-              chrome.runtime.lastError.message,
-            );
-            // Fallback — execute directly in page
             chrome.scripting.executeScript({
               target: { tabId: tabs[0].id },
               func: () => {
                 if (typeof startBulkConnect === "function") {
                   isBulkMode = true;
                   startBulkConnect();
-                } else {
-                  console.log("❌ startBulkConnect not found in page");
                 }
               },
             });
-          } else {
-            console.log("✅ Bulk connect message sent:", response);
           }
         },
       );
     });
+    window.close();
+  });
+
+  // Open Dashboard
+  document.getElementById("openDashboard").addEventListener("click", () => {
+    chrome.tabs.create({ url: `${APP_URL}/dashboard` });
+  });
+
+  // Open Settings
+  document.getElementById("openSettings").addEventListener("click", (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: `${APP_URL}/settings` });
+  });
+
+  // Help
+  document.getElementById("openHelp").addEventListener("click", (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: `${APP_URL}/training` });
   });
 });

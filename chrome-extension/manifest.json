@@ -17,7 +17,8 @@
     "https://linkedin.com/*",
     "https://*.linkedin.com/*",
     "http://localhost:3000/*",
-    "http://127.0.0.1:3000/*"
+    "http://127.0.0.1:3000/*",
+    "https://prosp-clone-xbwu.vercel.app/*"
   ],
   "background": {
     "service_worker": "background.js"
