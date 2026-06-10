@@ -4,65 +4,66 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const message = body.message.toLowerCase();
+    const message = body.message;
 
-    let reply = "";
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
 
-    // Greetings
-    if (
-      message.includes("hi") ||
-      message.includes("hello") ||
-      message.includes("hey")
-    ) {
-      reply =
-        "👋 Hey! I can help you generate LinkedIn outreach campaigns, cold DMs, follow-ups, and AI prospecting strategies.";
-    }
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        },
 
-    // Help
-    else if (message.includes("help")) {
-      reply =
-        "You can ask me about cold outreach, campaigns, LinkedIn automation, reply rates, lead generation, or message personalization.";
-    }
+        body: JSON.stringify({
+          model: "deepseek/deepseek-chat-v3-0324:free",
 
-    // Cold outreach
-    else if (message.includes("cold")) {
-      reply =
-        "Cold outreach works best when messages are short, personalized, and focused on the prospect’s pain points.";
-    }
+          max_tokens: 80,
 
-    // Campaigns
-    else if (message.includes("campaign")) {
-      reply =
-        "AI campaigns perform better when you segment leads by industry, role, and intent signals.";
-    }
+          messages: [
+            {
+              role: "system",
+              content: `
+You are an AI assistant for LinkedIn outreach and SaaS sales.
 
-    // Reply rates
-    else if (message.includes("reply")) {
-      reply =
-        "Improving reply rates usually requires shorter personalized messages and strong opening lines.";
-    }
+Rules:
+- Give concise and clean responses
+- Use proper formatting
+- Avoid broken unicode characters
+- Keep LinkedIn DMs short
+- Keep emails professional
+- Never output JSON
+- Never explain yourself
+`,
+            },
 
-    // Leads
-    else if (message.includes("lead")) {
-      reply =
-        "You should enrich leads with LinkedIn activity, company size, and buying intent for higher conversions.";
-    }
+            {
+              role: "user",
+              content: message,
+            },
+          ],
+        }),
+      },
+    );
 
-    // Default
-    else {
-      reply =
-        "I'm your AI outreach assistant. Ask me about LinkedIn growth, campaigns, cold outreach, or lead generation.";
-    }
+    const data = await response.json();
+
+    console.log(data);
+
+    const reply =
+      data?.choices?.[0]?.message?.content ||
+      "Sorry, I could not generate a response.";
 
     return NextResponse.json({
       reply,
     });
   } catch (error) {
-    console.error(error);
+    console.log(error);
 
     return NextResponse.json(
       {
-        reply: "Something went wrong.",
+        reply: "AI server error.",
       },
       { status: 500 },
     );

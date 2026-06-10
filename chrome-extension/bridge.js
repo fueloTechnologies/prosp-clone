@@ -1,6 +1,6 @@
 console.log("✅ Prosp bridge ready");
 
-// ── Ask background.js to sync user email (it can hit localhost, we can't) ──
+// ── Ask background.js to sync user email ──
 chrome.runtime.sendMessage({ action: "sync_user_email" }, (response) => {
   if (chrome.runtime.lastError) {
     console.warn(
@@ -13,6 +13,45 @@ chrome.runtime.sendMessage({ action: "sync_user_email" }, (response) => {
     console.log("✅ User email synced via background:", response.email);
   } else {
     console.warn("⚠️ No email from background sync");
+  }
+});
+
+// ── PING/PONG: let the website detect the extension is installed ──
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+
+  // Detection ping from AccountsTab
+  if (event.data?.type === "PROSP_EXTENSION_PING") {
+    console.log("🏓 PING received — sending PONG");
+    window.postMessage({ type: "PROSP_EXTENSION_PONG" }, "*");
+    return;
+  }
+
+  // ── Website → Extension import ──
+  if (event.data?.type !== "PROSP_START_IMPORT") return;
+
+  console.log("🚀 START IMPORT RECEIVED");
+  try {
+    chrome.runtime.sendMessage(
+      {
+        action: "start_linkedin_import",
+        url: event.data.payload.url,
+        campaignId: event.data.payload.campaignId,
+        importType: event.data.payload.importType,
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "❌ sendMessage failed:",
+            chrome.runtime.lastError.message,
+          );
+        } else {
+          console.log("✅ Message sent to background:", response);
+        }
+      },
+    );
+  } catch (err) {
+    console.error("❌ Bridge crashed:", err);
   }
 });
 
@@ -67,9 +106,13 @@ window.addEventListener("prosp_click_coords", (event) => {
   );
 });
 
-// ── Forward connect action ──
+// ── Forward connect/scrape actions from background to content.js ──
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "connect" || message.action === "start_bulk_connect") {
+  if (
+    message.action === "connect" ||
+    message.action === "start_bulk_connect" ||
+    message.action === "scrape_search_results"
+  ) {
     window.dispatchEvent(new CustomEvent("prosp_action", { detail: message }));
     sendResponse({ success: true });
   }

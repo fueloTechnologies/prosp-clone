@@ -31,7 +31,9 @@
       "matches": [
         "https://www.linkedin.com/*",
         "https://linkedin.com/*",
-        "https://*.linkedin.com/*"
+        "https://*.linkedin.com/*",
+        "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*"
       ],
       "js": ["bridge.js"],
       "run_at": "document_idle",
@@ -41,11 +43,13 @@
       "matches": [
         "https://www.linkedin.com/*",
         "https://linkedin.com/*",
-        "https://*.linkedin.com/*"
+        "https://*.linkedin.com/*",
+        "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle",
-      "world": "MAIN"
+      "world": "ISOLATED"
     }
   ]
 }

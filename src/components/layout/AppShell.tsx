@@ -21,7 +21,7 @@ import {
   Share2,
   LogOut,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const NAV_TABS = [
   { key: "sequences", label: "Sequences", icon: Network, href: "/sequences" },
@@ -49,6 +49,22 @@ export default function AppShell({ children, activeTab }: AppShellProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string>("");
+
+  const router = useRouter();
+
+  // ✅ Load saved avatar from DB on mount
+  useEffect(() => {
+    // Use session image as immediate fallback
+    if (session?.user?.image) setAvatarUrl(session.user.image);
+    // Then fetch latest from DB (may have been updated in settings)
+    fetch("/api/settings/general")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.avatar) setAvatarUrl(d.avatar);
+      })
+      .catch(() => {});
+  }, [session]);
 
   const referralLink = `https://prosp.ai?ref=${session?.user?.email?.split("@")[0] || "friend"}`;
 
@@ -57,7 +73,6 @@ export default function AppShell({ children, activeTab }: AppShellProps) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
-  const router = useRouter();
 
   const ROUTES: Record<string, string> = {
     dashboard: "/dashboard",
@@ -111,40 +126,55 @@ export default function AppShell({ children, activeTab }: AppShellProps) {
             </div>
             <button
               onClick={() => router.push("/settings")}
-              className="
-    w-10
-    h-10
-    rounded-xl
-    border
-    border-[#ececf4]
-    bg-white
-    flex
-    items-center
-    justify-center
-    hover:bg-[#f8f8fc]
-    transition-all
-    duration-200
-  "
+              className="w-10 h-10 rounded-xl border border-[#ececf4] bg-white flex items-center justify-center hover:bg-[#f8f8fc] transition-all duration-200"
             >
               <Settings size={18} className="text-gray-600" />
             </button>
-            {/* User avatar + dropdown */}
+
+            {/* ✅ User avatar — shows real photo if uploaded, falls back to initials */}
             <div className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:bg-brand-600 transition-colors"
+                className="w-9 h-9 rounded-full overflow-hidden border-2 border-violet-200 hover:border-violet-400 transition-all cursor-pointer flex-shrink-0"
               >
-                {initials}
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt={initials}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-brand-500 flex items-center justify-center text-white text-xs font-bold">
+                    {initials}
+                  </div>
+                )}
               </button>
+
               {showUserMenu && (
-                <div className="absolute right-0 top-10 bg-white border border-border rounded-xl shadow-modal w-48 py-2 z-50">
-                  <div className="px-3 py-2 border-b border-border mb-1">
-                    <p className="text-sm font-medium text-ink truncate">
-                      {session?.user?.name}
-                    </p>
-                    <p className="text-xs text-ink-tertiary truncate">
-                      {session?.user?.email}
-                    </p>
+                <div className="absolute right-0 top-11 bg-white border border-border rounded-xl shadow-modal w-52 py-2 z-50">
+                  <div className="flex items-center gap-3 px-3 py-2 border-b border-border mb-1">
+                    {/* Mini avatar in dropdown too */}
+                    <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0">
+                      {avatarUrl ? (
+                        <img
+                          src={avatarUrl}
+                          alt={initials}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-brand-500 flex items-center justify-center text-white text-xs font-bold">
+                          {initials}
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-ink truncate">
+                        {session?.user?.name}
+                      </p>
+                      <p className="text-xs text-ink-tertiary truncate">
+                        {session?.user?.email}
+                      </p>
+                    </div>
                   </div>
                   <button
                     onClick={() => signOut({ callbackUrl: "/login" })}
@@ -162,36 +192,29 @@ export default function AppShell({ children, activeTab }: AppShellProps) {
         <div className="flex flex-1 overflow-hidden">
           {/* Sidebar */}
           <div className="sidebar">
-            {/* Logo */}
             <div className="w-8 h-8 bg-brand-500 rounded-xl flex items-center justify-center mb-6 flex-shrink-0">
               <Heart size={15} className="text-white fill-white" />
             </div>
-
-            {SIDEBAR_ICONS.map(({ icon: Icon, key, title }) => {
-              const route = ROUTES[key];
-
-              return (
-                <button
-                  key={key}
-                  title={title}
-                  onClick={() => {
-                    if (route) {
-                      router.push(route);
-                    }
-                  }}
-                  className={`sidebar-icon ${activeTab === key ? "active" : ""}`}
-                >
-                  <Icon size={18} className="text-current" />
-                </button>
-              );
-            })}
+            {SIDEBAR_ICONS.map(({ icon: Icon, key, title }) => (
+              <button
+                key={key}
+                title={title}
+                onClick={() => {
+                  if (ROUTES[key]) router.push(ROUTES[key]);
+                }}
+                className={`sidebar-icon ${activeTab === key ? "active" : ""}`}
+              >
+                <Icon size={18} className="text-current" />
+              </button>
+            ))}
           </div>
 
-          {/* Main content area */}
+          {/* Main content */}
           <div className="flex-1 overflow-hidden flex flex-col">{children}</div>
         </div>
       </div>
-      {/* Share Modal */} {/* ✅ ADD HERE — before the closing ); */}
+
+      {/* Share Modal */}
       {showShareModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
           <div className="bg-white rounded-2xl shadow-xl w-[420px] p-6 relative">

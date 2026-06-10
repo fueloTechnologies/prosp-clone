@@ -1,110 +1,128 @@
+// src/app/api/contacts/save/route.ts
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, x-api-key",
-};
+const API_KEY = "prosp-extension-secret-123";
 
 export async function POST(req: Request) {
+  const apiKey = req.headers.get("x-api-key");
+  if (apiKey !== API_KEY) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json();
     const {
       firstName,
       lastName,
-      linkedinUrl,
-      position,
+      email,
       company,
+      position,
+      linkedinUrl, // extension sends lowercase — normalised below
       location,
       avatar,
+      userEmail,
+      campaignId,
     } = body;
 
-    // 🔥 Check API key first (for Chrome extension)
-    const apiKey = req.headers.get("x-api-key");
-    const isExtension =
-      apiKey ===
-      (process.env.EXTENSION_API_KEY || "prosp-extension-secret-123");
-
-    let userId: string;
-
-    if (isExtension) {
-      const user = await prisma.user.findUnique({
-        where: { email: body.userEmail },
-      });
-      if (!user) {
-        console.error("❌ No user found for email:", body.userEmail);
-        return NextResponse.json(
-          { error: `No user found for email: ${body.userEmail}` },
-          { status: 404, headers: CORS_HEADERS },
-        );
-      }
-      userId = user.id;
-    } else {
-      // Web app saves — require session
-      const session = await getServerSession(authOptions);
-      if (!session?.user?.email) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401, headers: CORS_HEADERS },
-        );
-      }
-
-      const user = await prisma.user.findUnique({
-        where: { email: session.user.email },
-      });
-
-      if (!user) {
-        return NextResponse.json(
-          { error: "User not found" },
-          { status: 404, headers: CORS_HEADERS },
-        );
-      }
-      userId = user.id;
+    if (!firstName || !linkedinUrl) {
+      return NextResponse.json(
+        { error: "firstName and linkedinUrl are required" },
+        { status: 400 },
+      );
     }
 
-    // 🔥 Check if contact already exists
-    if (linkedinUrl) {
-      const existing = await prisma.contact.findFirst({
-        where: { userId, linkedInUrl: linkedinUrl },
+    // ── Resolve user (required field in schema) ──
+    let userId: string | null = null;
+    if (userEmail) {
+      const user = await prisma.user.findUnique({
+        where: { email: userEmail },
+        select: { id: true },
       });
-
-      if (existing) {
-        return NextResponse.json(
-          { message: "Already exists", contact: existing },
-          { headers: CORS_HEADERS },
-        );
-      }
+      userId = user?.id ?? null;
     }
 
-    // 🔥 Create contact
-    const contact = await prisma.contact.create({
-      data: {
-        userId,
-        firstName: firstName || "Unknown",
-        lastName: lastName || "",
-        linkedInUrl: linkedinUrl || null,
-        position: position || null,
-        company: company || null,
-        location: location || null,
-        avatar: avatar || null,
-      },
+    if (!userId) {
+      // Fallback: first user (replace with proper session auth if multi-tenant)
+      const firstUser = await prisma.user.findFirst({ select: { id: true } });
+      userId = firstUser?.id ?? null;
+    }
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: "No user found — cannot save contact" },
+        { status: 400 },
+      );
+    }
+
+    // ── Find or create contact ──
+    // Schema field is linkedInUrl (capital I) — no unique index so we use findFirst
+    let contact = await prisma.contact.findFirst({
+      where: { linkedInUrl: linkedinUrl },
     });
 
-    console.log("✅ Contact saved:", contact.firstName, contact.lastName);
+    if (contact) {
+      contact = await prisma.contact.update({
+        where: { id: contact.id },
+        data: {
+          firstName,
+          lastName: lastName || "",
+          email: email || null,
+          company: company || "",
+          position: position || "",
+          location: location || "",
+          avatar: avatar || "",
+        },
+      });
+    } else {
+      contact = await prisma.contact.create({
+        data: {
+          firstName,
+          lastName: lastName || "",
+          email: email || null,
+          company: company || "",
+          position: position || "",
+          linkedInUrl: linkedinUrl, // ✅ capital I matches schema
+          location: location || "",
+          avatar: avatar || "",
+          status: "NEW", // ✅ ContactStatus.NEW (no PENDING in your enum)
+          userId,
+        },
+      });
+    }
 
-    return NextResponse.json(contact, { headers: CORS_HEADERS });
-  } catch (error) {
-    console.log("❌ Save contact error:", error);
+    // ── Link to campaign ──
+    if (campaignId) {
+      const existing = await prisma.campaignContact.findUnique({
+        where: {
+          campaignId_contactId: { campaignId, contactId: contact.id },
+        },
+      });
+
+      if (!existing) {
+        await prisma.campaignContact.create({
+          data: {
+            campaignId,
+            contactId: contact.id,
+            status: "PENDING", // ✅ CampaignContactStatus.PENDING — exists in your enum
+          },
+        });
+
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { totalContacts: { increment: 1 } },
+        });
+
+        console.log(`✅ Linked ${contact.firstName} → campaign ${campaignId}`);
+      }
+    }
+
+    return NextResponse.json(contact, { status: 200 });
+  } catch (err: any) {
+    console.error("❌ /api/contacts/save error:", err);
     return NextResponse.json(
-      { error: "Failed to save contact" },
-      { status: 500, headers: CORS_HEADERS },
+      { error: "Failed to save contact", detail: err.message },
+      { status: 500 },
     );
   }
-}
-
-export async function OPTIONS() {
-  return NextResponse.json({}, { headers: CORS_HEADERS });
 }

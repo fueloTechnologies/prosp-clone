@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 
 export default function AIChatbot() {
   const [open, setOpen] = useState(false);
+
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -17,7 +19,7 @@ export default function AIChatbot() {
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto scroll
+  // Auto Scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth",
@@ -38,40 +40,48 @@ export default function AIChatbot() {
       },
     ]);
 
-    // Clear input immediately
+    // Clear input
     setMessage("");
 
+    // Start loading
     setLoading(true);
 
     try {
-      const response = await fetch("/api/ai/chat", {
+      const res = await fetch("/api/ai/chat", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
         },
+
         body: JSON.stringify({
           message: currentMessage,
         }),
       });
 
-      const data = await response.json();
+      const data = await res.json();
 
+      console.log(data);
+
+      // Add AI reply
       setMessages((prev: any) => [
         ...prev,
         {
           role: "assistant",
           content:
-            data.reply || "⚠️ AI server connected but no response received.",
+            data.reply ||
+            data.choices?.[0]?.message?.content ||
+            "No response generated.",
         },
       ]);
     } catch (error) {
-      console.error("Chat Error:", error);
+      console.error(error);
 
       setMessages((prev: any) => [
         ...prev,
         {
           role: "assistant",
-          content: "❌ Something went wrong.",
+          content: "❌ Failed to generate response.",
         },
       ]);
     } finally {
@@ -81,7 +91,7 @@ export default function AIChatbot() {
 
   return (
     <>
-      {/* Floating Chat Button */}
+      {/* Floating Button */}
       <button
         onClick={() => setOpen(!open)}
         className="fixed bottom-6 left-6 z-50 w-14 h-14 rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-500 shadow-2xl flex items-center justify-center hover:scale-105 transition"
@@ -108,6 +118,26 @@ export default function AIChatbot() {
             </button>
           </div>
 
+          {/* Suggested Prompts */}
+          {messages.length === 1 && (
+            <div className="px-4 pt-4 flex flex-wrap gap-2">
+              {[
+                "Write a cold DM",
+                "Generate follow-up message",
+                "Improve reply rates",
+                "Create outreach sequence",
+              ].map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => setMessage(prompt)}
+                  className="text-xs px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {messages.map((msg: any, index) => (
@@ -124,16 +154,16 @@ export default function AIChatbot() {
                       : "bg-white/10 text-white rounded-bl-md"
                   }`}
                 >
-                  {msg.content}
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
                 </div>
               </div>
             ))}
 
-            {/* Typing Loader */}
+            {/* Loading */}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-white/10 text-white px-4 py-3 rounded-2xl rounded-bl-md text-sm animate-pulse">
-                  Typing...
+                <div className="bg-white/10 text-white px-4 py-2 rounded-2xl text-sm animate-pulse">
+                  Thinking...
                 </div>
               </div>
             )}

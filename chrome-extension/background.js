@@ -1,7 +1,7 @@
 console.log("✅ Prosp background service worker started");
+console.log("🔥 BACKGROUND LOADED");
 
-// ── Config — change this to your production URL when deployed ──
-const APP_URL = "https://prosp-clone-xbwu.vercel.app";
+const APP_URL = "http://localhost:3000";
 const API_KEY = "prosp-extension-secret-123";
 
 const keepAlive = () =>
@@ -19,8 +19,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
     console.log(
       "📦 New contact detected:",
       payload.fullName,
-      "| user:",
-      payload.userEmail,
+      "| campaign:",
+      payload.campaignId,
     );
     if (
       !payload.firstName ||
@@ -37,7 +37,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 function saveContactToAPI(key, payload, retries = 3) {
-  console.log("📤 Sending to API — userEmail:", payload.userEmail);
+  console.log(
+    "📤 Sending to API — campaignId:",
+    payload.campaignId,
+    "userEmail:",
+    payload.userEmail,
+  );
   fetch(`${APP_URL}/api/contacts/save`, {
     method: "POST",
     headers: {
@@ -54,6 +59,7 @@ function saveContactToAPI(key, payload, retries = 3) {
       location: payload.location || "",
       avatar: payload.avatar || "",
       userEmail: payload.userEmail || null,
+      campaignId: payload.campaignId || null, // ✅ ADDED
     }),
   })
     .then((res) => {
@@ -72,7 +78,33 @@ function saveContactToAPI(key, payload, retries = 3) {
     });
 }
 
+// ── RELIABLE tab messaging helper ──
+// Retries sendMessage until content script is ready (max 15s)
+function sendMessageWhenReady(tabId, message, maxTries = 30, interval = 500) {
+  let tries = 0;
+  const tryMsg = () => {
+    tries++;
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      if (chrome.runtime.lastError) {
+        if (tries < maxTries) {
+          setTimeout(tryMsg, interval);
+        } else {
+          console.error(
+            "❌ Content script never became ready in tab",
+            tabId,
+            chrome.runtime.lastError.message,
+          );
+        }
+      } else {
+        console.log("✅ Message delivered to content script:", response);
+      }
+    });
+  };
+  tryMsg();
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // ── Sync user email ──
   if (message.action === "sync_user_email") {
     fetch(`${APP_URL}/api/auth/session-sync`, {
       method: "GET",
@@ -99,6 +131,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // ── LinkedIn Import (triggered from website via bridge.js) ──
+  if (message.action === "start_linkedin_import") {
+    console.log(
+      "🚀 START LINKEDIN IMPORT — url:",
+      message.url,
+      "campaign:",
+      message.campaignId,
+    );
+
+    chrome.tabs.create({ url: message.url, active: true }, (tab) => {
+      const tabId = tab.id;
+      console.log("🆕 LinkedIn tab created:", tabId);
+
+      // Listen for the tab to fully load
+      chrome.tabs.onUpdated.addListener(function listener(updatedTabId, info) {
+        if (updatedTabId !== tabId || info.status !== "complete") return;
+        chrome.tabs.onUpdated.removeListener(listener);
+        console.log("✅ LinkedIn tab fully loaded — injecting scrape command");
+
+        // ✅ Use retry-based sending instead of a fixed timeout
+        sendMessageWhenReady(tabId, {
+          action: "scrape_search_results",
+          campaignId: message.campaignId,
+          importType: message.importType || "linkedin_search",
+          url: message.url,
+        });
+      });
+    });
+
+    sendResponse({ success: true });
+    return true;
+  }
+
+  // ── Click at coords ──
   if (message.action === "click_at_coords") {
     const tabId = sender.tab.id;
     chrome.debugger.attach({ tabId }, "1.3", () => {
@@ -139,29 +205,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // ── Execute connection request ──
   if (message.action === "execute_connection_request") {
     chrome.tabs.create({ url: message.linkedinUrl, active: true }, (tab) => {
-      setTimeout(() => {
-        chrome.tabs.sendMessage(
-          tab.id,
-          { action: "connect", message: message.message },
-          (response) => {
-            console.log("✅ Connect trigger sent:", response);
-          },
-        );
-      }, 8000);
+      sendMessageWhenReady(
+        tab.id,
+        { action: "connect", message: message.message },
+        20,
+        800,
+      );
     });
     sendResponse({ success: true });
     return true;
   }
 
-  // ── Extension status ping — used by settings page to detect extension ──
+  // ── Ping ──
   if (message.action === "ping") {
     sendResponse({ pong: true, version: "1.0" });
     return true;
   }
 });
 
+// ── Poll for tasks from server ──
 async function pollTasks() {
   try {
     const response = await fetch(`${APP_URL}/api/extension/connect`, {
@@ -171,28 +236,85 @@ async function pollTasks() {
     const data = await response.json();
     if (!data.task) return;
     console.log("📥 Task received:", data.task);
+
     if (data.task.action === "execute_connection_request") {
       chrome.tabs.create(
         { url: data.task.linkedinUrl, active: true },
         (tab) => {
+          sendMessageWhenReady(
+            tab.id,
+            { action: "connect", message: data.task.message },
+            20,
+            800,
+          );
+          // Mark done after delivery
           setTimeout(() => {
-            chrome.tabs.sendMessage(
-              tab.id,
-              { action: "connect", message: data.task.message },
-              () => {
-                fetch(`${APP_URL}/api/extension/connect`, {
-                  method: "PUT",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": API_KEY,
-                  },
-                  body: JSON.stringify({ taskId: data.task.id, success: true }),
-                });
+            fetch(`${APP_URL}/api/extension/connect`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": API_KEY,
               },
-            );
-          }, 8000);
+              body: JSON.stringify({ taskId: data.task.id, success: true }),
+            });
+          }, 10000);
         },
       );
+    }
+
+    if (data.task.action === "scrape_url") {
+      console.log("🔍 Opening URL to scrape:", data.task.url);
+      chrome.tabs.create({ url: data.task.url, active: true }, (tab) => {
+        sendMessageWhenReady(
+          tab.id,
+          {
+            action: "scrape_search_results",
+            campaignId: data.task.campaignId,
+          },
+          30,
+          500,
+        );
+        setTimeout(() => {
+          fetch(`${APP_URL}/api/extension/connect`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": API_KEY,
+            },
+            body: JSON.stringify({ taskId: data.task.id, success: true }),
+          });
+        }, 15000);
+      });
+    }
+
+    if (data.task.action === "lead_finder") {
+      const { title, company, location, industry } = data.task.filters || {};
+      const keywords = [title, company, location, industry]
+        .filter(Boolean)
+        .join(" ");
+      const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(keywords)}`;
+      console.log("🔍 Lead finder search:", searchUrl);
+      chrome.tabs.create({ url: searchUrl, active: true }, (tab) => {
+        sendMessageWhenReady(
+          tab.id,
+          {
+            action: "scrape_search_results",
+            campaignId: data.task.campaignId,
+          },
+          30,
+          500,
+        );
+        setTimeout(() => {
+          fetch(`${APP_URL}/api/extension/connect`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": API_KEY,
+            },
+            body: JSON.stringify({ taskId: data.task.id, success: true }),
+          });
+        }, 15000);
+      });
     }
   } catch (error) {
     console.error("❌ Polling failed:", error.message);

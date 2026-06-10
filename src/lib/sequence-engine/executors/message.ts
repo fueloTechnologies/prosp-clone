@@ -16,15 +16,17 @@ export async function executeMessage({
       return { success: false };
     }
 
+    // ✅ Use execute_connection_request with send_message action
+    // background.js handles "execute_connection_request" → opens tab → content.js gets "connect" message
     const response = await fetch(
       "http://localhost:3000/api/extension/connect",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          action: "execute_connection_request",
           linkedinUrl: linkedInUrl,
           message: finalContent,
-          action: "send_message",
         }),
       },
     );

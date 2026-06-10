@@ -16,16 +16,16 @@ export async function executeFollowUp({
       return { success: false };
     }
 
-    // Follow-up goes through extension just like a message
+    // ✅ Same action as connection request — background.js opens tab and sends message
     const response = await fetch(
       "http://localhost:3000/api/extension/connect",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          action: "execute_connection_request",
           linkedinUrl: linkedInUrl,
           message: finalContent,
-          action: "send_message",
         }),
       },
     );

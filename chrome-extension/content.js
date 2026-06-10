@@ -4,10 +4,8 @@ console.log("🔥 Prosp content.js injected successfully");
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
 function randomDelay(min, max) {
   const time = Math.floor(Math.random() * (max - min + 1)) + min;
-  console.log(`⏳ Waiting ${time} ms`);
   return new Promise((resolve) => setTimeout(resolve, time));
 }
 
@@ -15,398 +13,600 @@ let connectButtons = [];
 let index = 0;
 let currentPage = 0;
 let isBulkMode = false;
-
 const MAX_CONNECTS = 25;
 let sentCount = 0;
-
-const DEFAULT_MESSAGE = `Hi {firstName},
-
-Came across your profile and would love to connect!
-
-Best,
-Tejeshwar`;
+const MIN_DELAY = 15000;
+const MAX_DELAY = 45000;
+const DEFAULT_MESSAGE = `Hi {firstName},\n\nCame across your profile and would love to connect!\n\nBest,\nTejeshwar`;
 
 function checkWeeklyLimit() {
-  const bodyText = document.body.innerText.toLowerCase();
-  if (bodyText.includes("weekly limit")) {
-    console.log("🚫 Weekly limit reached — stopping automation");
-    return true;
-  }
-  return false;
+  return document.body.innerText.toLowerCase().includes("weekly limit");
 }
 
-/* ============================
-   HELPER: Parse position + company
-   Handles: "Role at Company", "Role @ Company",
-            "Role | Company", "Role • Company", plain "Role"
-============================= */
 function parsePositionCompany(text) {
   if (!text) return { position: "", company: "" };
   text = text.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
-
-  if (text.includes(" at ")) {
-    const parts = text.split(" at ");
-    return {
-      position: parts[0].trim(),
-      company: parts.slice(1).join(" at ").trim(),
-    };
-  }
-  if (text.includes(" @ ")) {
-    const parts = text.split(" @ ");
-    return {
-      position: parts[0].trim(),
-      company: parts.slice(1).join(" @ ").trim(),
-    };
-  }
-  if (text.includes(" | ")) {
-    const parts = text.split(" | ");
-    return {
-      position: parts[0].trim(),
-      company: parts[parts.length - 1].trim(),
-    };
-  }
-  if (text.includes(" • ")) {
-    const parts = text.split(" • ");
-    return {
-      position: parts[0].trim(),
-      company: parts.slice(1).join(" • ").trim(),
-    };
+  for (const sep of [" at ", " @ ", " | ", " • "]) {
+    if (text.includes(sep)) {
+      const parts = text.split(sep);
+      return {
+        position: parts[0].trim(),
+        company: parts.slice(1).join(sep).trim(),
+      };
+    }
   }
   return { position: text.trim(), company: "" };
 }
 
-/* ============================
-   HELPER: Extract headline from a search result card
-============================= */
 function extractHeadlineFromCard(card) {
   if (!card) return "";
-
-  const selectors = [
+  const sels = [
     '[data-field="headline"]',
     ".entity-result__primary-subtitle",
     ".entity-result__secondary-subtitle",
     ".artdeco-entity-lockup__subtitle",
     ".artdeco-entity-lockup__caption",
   ];
-
-  for (const sel of selectors) {
-    const el = card.querySelector(sel);
-    const text = el?.innerText?.trim();
+  for (const sel of sels) {
+    const text = card.querySelector(sel)?.innerText?.trim();
     if (text && text.length > 2 && text.length < 150) return text;
   }
-
-  const JOB_KEYWORDS = [
-    "Engineer",
-    "Developer",
-    "Manager",
-    "Analyst",
-    "Director",
-    "Founder",
-    "CEO",
-    "CTO",
-    "CFO",
-    "COO",
-    "Designer",
-    "Lead",
-    "Consultant",
-    "Architect",
-    "Head",
-    "VP",
-    "President",
-    "Officer",
-    "Specialist",
-    "Associate",
-    "Intern",
-    "Student",
-    "Researcher",
-    "Scientist",
-    "Product",
-    "Marketing",
-    "Sales",
-    "Operations",
-    "HR",
-    "Professor",
-  ];
-
-  const spans = Array.from(card.querySelectorAll("span, div"))
-    .map((el) => el.innerText?.replace(/\n/g, " ").replace(/\s+/g, " ").trim())
-    .filter((t) => {
-      if (!t || t.length < 3 || t.length > 150) return false;
-      if (t.includes("Connect") || t.includes("Follow")) return false;
-      const hasSeparator =
-        t.includes(" at ") || t.includes(" @ ") || t.includes(" | ");
-      const hasKeyword = JOB_KEYWORDS.some((kw) => t.includes(kw));
-      return hasSeparator || hasKeyword;
-    });
-
-  return spans[0] || "";
+  return "";
 }
 
 /* ============================
-   HELPER: Find the main profile Connect button
-   Scoped to current profile — ignores sidebar buttons
+   SEARCH RESULTS IMPORTER
+   Core logic: find profile links on the page
 ============================= */
-function findMainConnectButton() {
-  let fullName = "";
-  try {
-    fullName = document.title.replace(/\s*[\|\-]\s*(LinkedIn.*)?$/i, "").trim();
-  } catch (e) {}
+const IMPORT_LIMIT = 25;
 
-  console.log("🔍 Looking for Connect button for:", `"${fullName}"`);
+// ── THE KEY FIX: find cards by profile links, not by container selectors ──
+function getProfileCards() {
+  const allLinks = Array.from(
+    document.querySelectorAll('a[href*="linkedin.com/in/"], a[href^="/in/"]'),
+  );
+  console.log(`🔗 Total /in/ links on page: ${allLinks.length}`);
 
-  const mainEl = document.querySelector("main");
-  if (!mainEl) return null;
+  const cards = [];
+  const seenHrefs = new Set();
 
-  // ── Profile card buttons: left < 700px (sidebar is always ~1092px) ──
-  const profileCardButtons = Array.from(mainEl.querySelectorAll("button"))
-    .filter((b) => b.offsetParent !== null)
-    .filter((b) => b.getBoundingClientRect().left < 700);
+  for (const link of allLinks) {
+    let href = link.href || "";
+    // Normalise relative URLs
+    if (href.startsWith("/in/")) href = "https://www.linkedin.com" + href;
+    href = href.split("?")[0].replace(/\/$/, "");
 
-  // Strategy 1: Direct Connect button visible in profile card
-  const directConnect = profileCardButtons.find((b) => {
-    const text = b.innerText?.trim();
-    const aria = (b.getAttribute("aria-label") || "").toLowerCase();
-    return text === "Connect" || aria.includes("connect");
-  });
+    if (seenHrefs.has(href)) continue;
+    if (!href.includes("/in/") || href === "https://www.linkedin.com/in")
+      continue;
 
-  if (directConnect) {
-    console.log("✅ Found direct Connect button");
-    return directConnect;
+    // Skip nav/header/sidebar links — they are usually inside <nav> or have very short text
+    const linkText = link.innerText?.trim().replace(/\s+/g, " ") || "";
+    if (linkText.length < 2) continue;
+
+    // Skip if link is inside navigation elements
+    let inNav = false;
+    let p = link.parentElement;
+    for (let i = 0; i < 6; i++) {
+      if (!p) break;
+      const tag = p.tagName?.toLowerCase();
+      if (tag === "nav" || tag === "header" || tag === "footer") {
+        inNav = true;
+        break;
+      }
+      if (p.getAttribute("role") === "navigation") {
+        inNav = true;
+        break;
+      }
+      p = p.parentElement;
+    }
+    if (inNav) continue;
+
+    // Walk up to find a result card container
+    let container = link.parentElement;
+    for (let i = 0; i < 10; i++) {
+      if (!container) break;
+      const h = container.offsetHeight;
+      const txt = container.innerText?.length || 0;
+      if (h > 80 && txt > 50) break;
+      container = container.parentElement;
+    }
+
+    if (container) {
+      seenHrefs.add(href);
+      cards.push({ container, linkedinUrl: href, link });
+    }
   }
 
-  // Strategy 2: Connect hidden behind More button — click More, find span
-  const moreBtn = profileCardButtons.find((b) => {
-    const text = b.innerText?.trim();
-    const aria = b.getAttribute("aria-label");
-    return (text === "More" || text?.includes("More")) && !aria;
+  console.log(`📋 Profile cards found: ${cards.length}`);
+  return cards;
+}
+
+async function waitForCards(maxWait = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    const links = document.querySelectorAll('a[href*="linkedin.com/in/"]');
+    const validLinks = Array.from(links).filter((l) => {
+      const href = l.href;
+      return href.includes("/in/") && l.innerText?.trim().length > 1;
+    });
+    if (validLinks.length >= 3) {
+      console.log(`✅ Cards ready — found ${validLinks.length} profile links`);
+      return true;
+    }
+    console.log(`⏳ Waiting for cards... found ${validLinks.length} so far`);
+    await sleep(1500);
+  }
+  console.log("⚠️ Timed out waiting for cards");
+  return false;
+}
+
+async function scrapeCurrentPage(campaignId, importedSoFar, seenUrls) {
+  console.log(`🔍 scrapeCurrentPage — URL: ${window.location.href}`);
+
+  // Scroll to trigger lazy loading
+  for (let i = 0; i < 4; i++) {
+    window.scrollTo(0, document.body.scrollHeight * ((i + 1) / 4));
+    console.log(`📜 Scrolling... ${i + 1} / 4`);
+    await sleep(1800);
+  }
+  window.scrollTo(0, 0);
+  await sleep(800);
+
+  const cards = getProfileCards();
+  console.log(`👀 Cards found: ${cards.length}`);
+
+  if (cards.length === 0) {
+    console.log("❌ No cards found. DOM sample:");
+    console.log(document.body.innerHTML.substring(0, 500));
+    return 0;
+  }
+
+  let pageImported = 0;
+
+  for (const { container, linkedinUrl, link } of cards) {
+    if (importedSoFar + pageImported >= IMPORT_LIMIT) break;
+    if (seenUrls.has(linkedinUrl)) {
+      console.log(`⏭️ Skip duplicate: ${linkedinUrl}`);
+      continue;
+    }
+    seenUrls.add(linkedinUrl);
+
+    try {
+      // ── Name ──
+      let fullName = "";
+
+      // Try dedicated name selectors first (most reliable)
+      const nameSels = [
+        '[data-field="full_name"]',
+        ".entity-result__title-text a span[aria-hidden='true']",
+        ".entity-result__title-text span[aria-hidden='true']",
+        ".artdeco-entity-lockup__title span[aria-hidden='true']",
+        'span[aria-hidden="true"]',
+      ];
+      for (const sel of nameSels) {
+        const el = container.querySelector(sel);
+        const t = el?.innerText?.trim().split("\n")[0];
+        if (
+          t &&
+          t.length > 1 &&
+          t.length < 80 &&
+          !t.includes("LinkedIn Member")
+        ) {
+          fullName = t;
+          break;
+        }
+      }
+
+      // Fallback: use link text but clean it up
+      if (!fullName) {
+        fullName = link.innerText?.trim().split("\n")[0] || "";
+      }
+
+      // Fallback: parse from URL slug
+      if (!fullName || fullName.includes("LinkedIn Member")) {
+        const slug = linkedinUrl.split("/in/")[1]?.split("/")[0] || "";
+        fullName = slug
+          .replace(/-/g, " ")
+          .replace(/\d+/g, "")
+          .trim()
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+      }
+
+      // ── Clean the name ──
+      fullName = fullName
+        .replace(/•\s*(1st|2nd|3rd|\d+st|\d+nd|\d+rd|[\d]+)\s*$/i, "") // remove "• 2nd", "• 1st"
+        .replace(/[\u2022\u00b7]\s*(1st|2nd|3rd)/gi, "") // remove bullet + degree
+        .replace(/\s*[-–]\s*(1st|2nd|3rd)/gi, "") // remove "- 2nd"
+        .replace(/\(.*?\)/g, "") // remove (anything)
+        .replace(/\s{2,}/g, " ") // collapse spaces
+        .trim();
+
+      const parts = fullName.split(" ");
+      const firstName = parts[0] || "Unknown";
+      const lastName = parts.slice(1).join(" ");
+
+      // ── Headline → position + company ──
+      // Try multiple selectors aggressively
+      let headline = "";
+      const headlineSels = [
+        '[data-field="headline"]',
+        ".entity-result__primary-subtitle",
+        ".entity-result__secondary-subtitle",
+        ".artdeco-entity-lockup__subtitle",
+        ".artdeco-entity-lockup__caption",
+        ".entity-result__summary",
+      ];
+      for (const sel of headlineSels) {
+        const t = container.querySelector(sel)?.innerText?.trim();
+        if (t && t.length > 2 && t.length < 200) {
+          headline = t;
+          break;
+        }
+      }
+
+      // Fallback: look for "at" / "|" / "•" pattern in container text lines
+      if (!headline) {
+        const lines = (container.innerText || "")
+          .split("\n")
+          .map((l) => l.replace(/\s+/g, " ").trim())
+          .filter((l) => l.length > 3 && l.length < 200);
+        const nameIdx = lines.findIndex((l) => l.startsWith(firstName));
+        if (nameIdx !== -1) {
+          for (
+            let i = nameIdx + 1;
+            i < Math.min(nameIdx + 4, lines.length);
+            i++
+          ) {
+            const l = lines[i];
+            if (
+              l.includes(" at ") ||
+              l.includes(" | ") ||
+              l.includes(" @ ") ||
+              /engineer|manager|director|founder|ceo|cto|developer|analyst|consultant/i.test(
+                l,
+              )
+            ) {
+              headline = l;
+              break;
+            }
+          }
+        }
+      }
+
+      const { position, company } = parsePositionCompany(headline);
+
+      // ── Location ──
+      let location = "";
+      const locEl = container.querySelector(
+        ".entity-result__secondary-subtitle, [data-field='secondary_subtitle'], .artdeco-entity-lockup__caption",
+      );
+      if (locEl) {
+        const t = locEl.innerText?.trim();
+        if (t && !t.includes(" at ") && !t.includes(" | ")) location = t;
+      }
+
+      // ── Avatar ──
+      let avatar = "";
+      const img = container.querySelector("img");
+      if (img) avatar = img.src || img.getAttribute("data-delayed-url") || "";
+
+      const payload = {
+        firstName,
+        lastName,
+        fullName,
+        linkedinUrl,
+        position,
+        company,
+        location,
+        avatar,
+        campaignId,
+        userEmail: "",
+        source: "linkedin_search",
+      };
+
+      console.log(
+        `📦 CONTACT: ${firstName} ${lastName} | ${company} | ${linkedinUrl}`,
+      );
+      window.dispatchEvent(
+        new CustomEvent("prosp_save_contact", { detail: payload }),
+      );
+      pageImported++;
+      await randomDelay(200, 500);
+    } catch (err) {
+      console.error("❌ Card parse error:", err);
+    }
+  }
+
+  return pageImported;
+}
+
+function buildPageUrl(pageNum) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", pageNum);
+  // Keep only essential params
+  const keywords = url.searchParams.get("keywords") || "";
+  const newUrl = new URL("https://www.linkedin.com/search/results/people/");
+  if (keywords) newUrl.searchParams.set("keywords", keywords);
+  newUrl.searchParams.set("page", pageNum);
+  return newUrl.toString();
+}
+
+function getCurrentPageNum() {
+  const url = new URL(window.location.href);
+  return parseInt(url.searchParams.get("page") || "1");
+}
+
+function hasNextPage() {
+  const currentPage = getCurrentPageNum();
+  // Check Next button
+  const nextBtnSels = [
+    'button[aria-label="Next"]',
+    "button.artdeco-pagination__button--next",
+  ];
+  for (const sel of nextBtnSels) {
+    const btn = document.querySelector(sel);
+    if (btn && !btn.disabled) return true;
+  }
+  // Check via text
+  const found = Array.from(document.querySelectorAll("button")).find((b) => {
+    const t = b.innerText?.trim().toLowerCase();
+    const a = (b.getAttribute("aria-label") || "").toLowerCase();
+    return (t === "next" || a === "next") && !b.disabled;
   });
+  if (found) return true;
+  // Check if page numbers go higher
+  const pageBtns = Array.from(
+    document.querySelectorAll(
+      "li.artdeco-pagination__indicator--number button, [data-test-pagination-page-btn]",
+    ),
+  );
+  return pageBtns.some((b) => {
+    const n = parseInt(b.innerText?.trim() || "0");
+    return n > currentPage;
+  });
+}
 
+async function scrapeSearchResults(campaignId) {
+  console.log(
+    `🚀 SEARCH SCRAPE START | campaign: ${campaignId} | limit: ${IMPORT_LIMIT}`,
+  );
+  console.log(`📍 Current URL: ${window.location.href}`);
+
+  // Wait for page to be ready
+  await waitForCards(12000);
+
+  const seenUrls = new Set();
+  let totalImported = 0;
+
+  // ── Resume state from sessionStorage ──
+  const savedImported = sessionStorage.getItem("prosp_scrape_imported");
+  const savedSeen = sessionStorage.getItem("prosp_scrape_seen");
+  const savedCampaign = sessionStorage.getItem("prosp_scrape_campaignId");
+
+  if (savedImported && savedCampaign) {
+    totalImported = parseInt(savedImported) || 0;
+    campaignId = savedCampaign;
+    if (savedSeen) {
+      try {
+        JSON.parse(savedSeen).forEach((u) => seenUrls.add(u));
+      } catch (e) {}
+    }
+    console.log(
+      `🔄 Resumed — already imported: ${totalImported}, page: ${getCurrentPageNum()}`,
+    );
+  }
+
+  // Clear resume state immediately
+  sessionStorage.removeItem("prosp_scrape_running");
+  sessionStorage.removeItem("prosp_scrape_campaignId");
+  sessionStorage.removeItem("prosp_scrape_imported");
+  sessionStorage.removeItem("prosp_scrape_seen");
+
+  // ── Scrape this page ──
+  const pageImported = await scrapeCurrentPage(
+    campaignId,
+    totalImported,
+    seenUrls,
+  );
+  totalImported += pageImported;
+  console.log(
+    `✅ Page ${getCurrentPageNum()} done | this page: ${pageImported} | total: ${totalImported}`,
+  );
+
+  // ── Decide whether to continue ──
+  if (totalImported >= IMPORT_LIMIT) {
+    console.log(`🎉 Limit reached — total: ${totalImported}`);
+    return { success: true, count: totalImported };
+  }
+
+  if (pageImported === 0) {
+    console.log("⚠️ Nothing scraped on this page — stopping");
+    return { success: true, count: totalImported };
+  }
+
+  if (!hasNextPage()) {
+    console.log("📄 No next page — done");
+    return { success: true, count: totalImported };
+  }
+
+  // ── Navigate to next page ──
+  const nextPage = getCurrentPageNum() + 1;
+  const nextUrl = buildPageUrl(nextPage);
+
+  console.log(`➡️ Saving state and going to page ${nextPage}: ${nextUrl}`);
+
+  sessionStorage.setItem("prosp_scrape_running", "true");
+  sessionStorage.setItem("prosp_scrape_campaignId", campaignId);
+  sessionStorage.setItem("prosp_scrape_imported", totalImported.toString());
+  sessionStorage.setItem("prosp_scrape_seen", JSON.stringify([...seenUrls]));
+
+  await sleep(1000); // let last save events fire
+  window.location.href = nextUrl;
+}
+
+// ── Auto-resume on page load ──
+setTimeout(async () => {
+  if (sessionStorage.getItem("prosp_scrape_running") === "true") {
+    console.log("🔄 AUTO-RESUME triggered on new page load");
+    const campaignId = sessionStorage.getItem("prosp_scrape_campaignId");
+    if (campaignId) await scrapeSearchResults(campaignId);
+  }
+}, 5000);
+
+/* ============================
+   CONNECT AUTOMATION (unchanged)
+============================= */
+function findMainConnectButton() {
+  const mainEl = document.querySelector("main");
+  if (!mainEl) return null;
+  const profileCardButtons = Array.from(
+    mainEl.querySelectorAll("button"),
+  ).filter(
+    (b) => b.offsetParent !== null && b.getBoundingClientRect().left < 700,
+  );
+  const directConnect = profileCardButtons.find((b) => {
+    const text = b.innerText?.trim().toLowerCase() || "";
+    const aria = (b.getAttribute("aria-label") || "").toLowerCase();
+    return text === "connect" || aria.includes("connect");
+  });
+  if (directConnect?.innerText?.toLowerCase().includes("follow")) return null;
+  if (directConnect) return directConnect;
+  const moreBtn = profileCardButtons.find(
+    (b) => b.innerText?.trim() === "More" && !b.getAttribute("aria-label"),
+  );
   if (moreBtn) {
-    console.log("🔍 Clicking More to reveal Connect...");
     moreBtn.click();
-
     return new Promise((resolve) => {
       let tries = 0;
-      const interval = setInterval(() => {
+      const iv = setInterval(() => {
         tries++;
-
-        // ✅ KEY FIX: Connect is a SPAN — find it then get its parent button
-        const allSpans = Array.from(document.querySelectorAll("span")).filter(
+        const spans = Array.from(document.querySelectorAll("span")).filter(
           (s) =>
             s.children.length === 0 &&
             s.innerText?.trim() === "Connect" &&
             s.offsetParent !== null,
         );
-
-        for (const span of allSpans) {
-          // Walk up to find the button parent
+        for (const span of spans) {
           let el = span.parentElement;
-          let depth = 0;
-          while (el && depth < 8) {
-            if (el.tagName === "BUTTON") {
-              // Make sure this button is NOT a sidebar button
-              const left = el.getBoundingClientRect().left;
-              if (left < 700) {
-                clearInterval(interval);
-                console.log(
-                  "✅ Found Connect span → button in dropdown, left:",
-                  left,
-                );
-                resolve(el);
-                return;
-              }
-            }
-            if (el.tagName === "A") {
-              // Some dropdown items are <a> tags not buttons
-              const left = el.getBoundingClientRect().left;
-              if (left < 700) {
-                clearInterval(interval);
-                console.log("✅ Found Connect span → link in dropdown");
-                resolve(el);
-                return;
-              }
+          let d = 0;
+          while (el && d < 8) {
+            if (
+              (el.tagName === "BUTTON" || el.tagName === "A") &&
+              el.getBoundingClientRect().left < 700
+            ) {
+              clearInterval(iv);
+              resolve(el);
+              return;
             }
             el = el.parentElement;
-            depth++;
+            d++;
           }
         }
-
         if (tries > 15) {
-          clearInterval(interval);
-          console.log("❌ Connect not found in dropdown after More click");
+          clearInterval(iv);
           resolve(null);
         }
       }, 400);
     });
   }
-
-  console.log("❌ Connect button not found");
   return null;
 }
 
-/* ============================
-   SINGLE CONNECT (profile page)
-============================= */
 function clickConnectButton() {
-  console.log("Searching MAIN profile Connect button...");
-
   try {
-    let fullName = document.title
+    const fullName = document.title
       .replace(/\s*[\|\-]\s*(LinkedIn.*)?$/i, "")
       .trim();
-    if (fullName && fullName.length > 1) {
+    if (fullName?.length > 1) {
       window.currentFirstName = fullName.split(" ")[0];
       window.currentFirstName =
         window.currentFirstName.charAt(0).toUpperCase() +
         window.currentFirstName.slice(1).toLowerCase();
-      console.log("👤 Profile name captured:", window.currentFirstName);
     }
-  } catch (err) {}
-
+  } catch (e) {}
   let attempts = 0;
-  const maxAttempts = 20;
-
   const tryFind = () => {
     attempts++;
-    const result = findMainConnectButton();
-
-    Promise.resolve(result).then((connectBtn) => {
-      if (connectBtn) {
-        console.log("✅ MAIN Connect FOUND — clicking");
-        connectBtn.click();
+    Promise.resolve(findMainConnectButton()).then((btn) => {
+      if (btn) {
+        const body = document.body.innerText.toLowerCase();
+        if (body.includes("pending") || body.includes("remove connection"))
+          return;
+        btn.click();
         setTimeout(() => saveContactToDatabase("", window.location.href), 1000);
         setTimeout(() => clickAddNote(), 2500);
-      } else if (attempts < maxAttempts) {
+      } else if (attempts < 20) {
         setTimeout(tryFind, 500);
       } else {
-        console.log(
-          "❌ MAIN Connect not found after retries — saving contact anyway",
-        );
         saveContactToDatabase("", window.location.href);
       }
     });
   };
-
   tryFind();
 }
-
 window.clickConnectButton = clickConnectButton;
-/* ============================
-   MESSAGE LISTENER
-============================= */
-window.addEventListener("prosp_action", (event) => {
-  const message = event.detail;
-  console.log("📩 Message received via window event:", message);
 
-  if (message.action === "connect") {
-    isBulkMode = false;
-    // Support campaign message if passed
-    if (message.message) window.campaignMessage = message.message;
-    clickConnectButton();
-  }
-  if (message.action === "start_bulk_connect") {
-    isBulkMode = true;
-    startBulkConnect();
-  }
-});
-
-/* ============================
-   BULK CONNECT
-============================= */
 function startBulkConnect() {
-  console.log("🚀 Starting bulk connect...");
   index = 0;
-
   const savedCount = sessionStorage.getItem("prosp_sent_count");
-  const savedPage = sessionStorage.getItem("prosp_page");
-
   if (savedCount) {
     sentCount = parseInt(savedCount);
-    currentPage = savedPage ? parseInt(savedPage) : 0;
-    console.log(`📊 Resuming — sent: ${sentCount}, page: ${currentPage + 1}`);
-    sessionStorage.removeItem("prosp_sent_count");
-    sessionStorage.removeItem("prosp_page");
-    sessionStorage.removeItem("prosp_keywords");
-    sessionStorage.removeItem("prosp_bulk_running");
+    currentPage = parseInt(sessionStorage.getItem("prosp_page") || "0");
+    [
+      "prosp_sent_count",
+      "prosp_page",
+      "prosp_keywords",
+      "prosp_bulk_running",
+    ].forEach((k) => sessionStorage.removeItem(k));
   } else {
     sentCount = 0;
     currentPage = 0;
   }
-
   autoScrollAndCollect();
 }
 
 function autoScrollAndCollect() {
   isBulkMode = true;
-  console.log("📜 Starting auto-scroll...");
-  let lastHeight = 0;
-  let attempts = 0;
-  const scrollInterval = setInterval(() => {
+  let lastHeight = 0,
+    attempts = 0;
+  const iv = setInterval(() => {
     window.scrollTo(0, document.body.scrollHeight);
-    let newHeight = document.body.scrollHeight;
-    if (newHeight === lastHeight) attempts++;
+    const h = document.body.scrollHeight;
+    if (h === lastHeight) attempts++;
     else attempts = 0;
-    lastHeight = newHeight;
+    lastHeight = h;
     if (attempts > 5) {
-      clearInterval(scrollInterval);
-      setTimeout(() => collectConnectButtons(), 3000);
+      clearInterval(iv);
+      setTimeout(collectConnectButtons, 3000);
     }
   }, 2000);
 }
 
-/* ============================
-   COLLECT CONNECT BUTTONS (Bulk)
-============================= */
 function collectConnectButtons() {
   connectButtons = Array.from(document.querySelectorAll("span")).filter(
     (el) => el.innerText?.trim() === "Connect",
   );
-
-  console.log("✅ Total Connect buttons:", connectButtons.length);
-
-  window.bulkContactData = connectButtons.map((el, i) => {
+  window.bulkContactData = connectButtons.map((el) => {
     let card = el.parentElement;
     for (let j = 0; j < 10; j++) {
-      if (!card) break;
-      if (card.querySelector('a[href*="/in/"]')) break;
+      if (!card || card.querySelector('a[href*="/in/"]')) break;
       card = card.parentElement;
     }
-
     const linkEl = card?.querySelector('a[href*="/in/"]');
     const linkedinUrl = linkEl ? linkEl.href.split("?")[0] : "";
-
     let firstName = "Unknown",
       lastName = "";
     if (linkedinUrl) {
-      const slug = linkedinUrl.split("/in/")[1]?.replace(/\/$/, "") || "";
-      const namePart = slug.replace(/-[a-z0-9]{4,}$/i, "").trim();
-      const words = namePart
+      const words = (linkedinUrl.split("/in/")[1]?.replace(/\/$/, "") || "")
+        .replace(/-[a-z0-9]{4,}$/i, "")
         .split("-")
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1));
       firstName = words[0] || "Unknown";
-      lastName = words.slice(1).join(" ") || "";
+      lastName = words.slice(1).join(" ");
     }
-
-    // Also try to get name from card text
-    const nameEl = card?.querySelector(
-      '[data-field="full_name"], .entity-result__title-text',
-    );
-    if (nameEl) {
-      const cardName = nameEl.innerText?.trim().split("\n")[0];
-      if (cardName) {
-        const parts = cardName.split(" ");
-        firstName = parts[0] || firstName;
-        lastName = parts.slice(1).join(" ") || lastName;
-      }
-    }
-
     const headline = extractHeadlineFromCard(card);
     const { position, company } = parsePositionCompany(headline);
-
-    console.log(
-      `👤 ${firstName} ${lastName} | pos: "${position}" | co: "${company}"`,
-    );
-
     return {
       firstName,
       lastName,
@@ -417,8 +617,6 @@ function collectConnectButtons() {
       avatar: "",
     };
   });
-
-  // Deduplicate
   const seen = new Set();
   const deduped = [];
   const dedupedBtns = [];
@@ -432,332 +630,232 @@ function collectConnectButtons() {
   });
   window.bulkContactData = deduped;
   connectButtons = dedupedBtns;
-
-  console.log("✅ After dedup:", connectButtons.length);
-
   if (connectButtons.length === 0) {
     goToNextPage(5000);
     return;
   }
-
   clickNext();
 }
 
-/* ============================
-   SAVE BULK CONTACT
-============================= */
 const savedUrls = new Set();
-
 function saveBulkContact() {
-  const contactData = window.bulkContactData?.[index - 1];
-  if (!contactData) return;
-
-  if (contactData.linkedinUrl && savedUrls.has(contactData.linkedinUrl)) {
-    console.log("⏭️ Skipping duplicate:", contactData.firstName);
-    return;
-  }
-
-  if (contactData.linkedinUrl) savedUrls.add(contactData.linkedinUrl);
-
-  console.log("💾 Saving bulk contact:", contactData);
-
-  window.dispatchEvent(
-    new CustomEvent("prosp_save_contact", { detail: contactData }),
-  );
+  const d = window.bulkContactData?.[index - 1];
+  if (!d || (d.linkedinUrl && savedUrls.has(d.linkedinUrl))) return;
+  if (d.linkedinUrl) savedUrls.add(d.linkedinUrl);
+  window.dispatchEvent(new CustomEvent("prosp_save_contact", { detail: d }));
 }
 
-/* ============================
-   CLICK NEXT BUTTON
-============================= */
 async function clickNext() {
   if (index >= connectButtons.length || sentCount >= MAX_CONNECTS) {
-    console.log("🎉 Bulk connect finished");
     isBulkMode = false;
     return;
   }
   if (checkWeeklyLimit()) return;
-
   const btn = connectButtons[index];
   if (!btn) {
     index++;
-    setTimeout(() => clickNext(), 5000);
+    setTimeout(clickNext, 5000);
     return;
   }
-
-  if (window.bulkContactData?.[index]) {
+  if (window.bulkContactData?.[index])
     window.currentFirstName = window.bulkContactData[index].firstName;
-  }
-
   btn.scrollIntoView({ block: "center" });
   await randomDelay(1000, 1500);
-
   const rect = btn.getBoundingClientRect();
-  const x = Math.round(rect.left + rect.width / 2);
-  const y = Math.round(rect.top + rect.height / 2);
-
   window.dispatchEvent(
-    new CustomEvent("prosp_click_coords", { detail: { x, y } }),
+    new CustomEvent("prosp_click_coords", {
+      detail: {
+        x: Math.round(rect.left + rect.width / 2),
+        y: Math.round(rect.top + rect.height / 2),
+      },
+    }),
   );
-
   await randomDelay(2000, 3000);
   clickAddNote();
 }
 
-/* ============================
-   CLICK ADD NOTE / SEND
-============================= */
 function clickAddNote() {
-  console.log("📝 Looking for Add Note / Send Without Note...");
   let tries = 0;
-
-  const interval = setInterval(() => {
+  const iv = setInterval(() => {
     tries++;
-
-    const allBtns = Array.from(
-      document.querySelectorAll('button, [role="button"]'),
+    const btns = Array.from(
+      document.querySelectorAll('button,[role="button"]'),
     );
-
-    const addNoteBtn = allBtns.find((btn) => {
-      const text = btn.innerText?.toLowerCase().trim();
-      return text === "add a note" || text?.includes("add a note");
-    });
-
-    if (addNoteBtn) {
-      console.log("✅ Add Note FOUND — clicking");
-      clearInterval(interval);
-      addNoteBtn.click();
-      setTimeout(() => insertMessage(), 1800);
+    const addNote = btns.find(
+      (b) => b.innerText?.toLowerCase().trim() === "add a note",
+    );
+    if (addNote) {
+      clearInterval(iv);
+      addNote.click();
+      setTimeout(insertMessage, 1800);
       return;
     }
-
-    const sendWithoutBtn = allBtns.find((btn) => {
-      const text = btn.innerText?.toLowerCase().trim();
-      return text?.includes("send without") || text?.includes("without a note");
-    });
-
-    if (sendWithoutBtn) {
-      console.log("✅ Send without note FOUND — clicking");
-      clearInterval(interval);
-      sendWithoutBtn.click();
+    const sendWithout = btns.find((b) =>
+      b.innerText?.toLowerCase().trim()?.includes("send without"),
+    );
+    if (sendWithout) {
+      clearInterval(iv);
+      sendWithout.click();
       if (isBulkMode) {
         sentCount++;
         index++;
-        console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
-      } else {
-        console.log(`✅ Single connect sent!`);
       }
       afterSend();
       return;
     }
-
     const host = document.querySelector("#interop-outlet");
     if (host?.shadowRoot) {
-      const shadowBtns = Array.from(host.shadowRoot.querySelectorAll("button"));
-
-      const shadowAdd = shadowBtns.find((b) =>
+      const sBtns = Array.from(host.shadowRoot.querySelectorAll("button"));
+      const sAdd = sBtns.find((b) =>
         b.innerText?.toLowerCase().includes("add a note"),
       );
-      if (shadowAdd) {
-        console.log("✅ Add Note in shadow DOM");
-        clearInterval(interval);
-        shadowAdd.click();
-        setTimeout(() => insertMessage(), 1800);
+      if (sAdd) {
+        clearInterval(iv);
+        sAdd.click();
+        setTimeout(insertMessage, 1800);
         return;
       }
-
-      const shadowSend = shadowBtns.find(
+      const sSend = sBtns.find(
         (b) =>
           b.innerText?.toLowerCase().includes("send without") ||
           b.innerText?.toLowerCase().trim() === "send",
       );
-      if (shadowSend) {
-        console.log("✅ Send in shadow DOM");
-        clearInterval(interval);
-        shadowSend.click();
+      if (sSend) {
+        clearInterval(iv);
+        sSend.click();
         if (isBulkMode) {
           sentCount++;
           index++;
-          console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
-        } else {
-          console.log(`✅ Single connect sent!`);
         }
         afterSend();
         return;
       }
     }
-
     if (tries > 25) {
-      console.log("❌ Modal not found — skipping");
-      clearInterval(interval);
+      clearInterval(iv);
       index++;
-
       if (!isBulkMode) {
-        // Single mode: save contact even if modal not found
         saveContactToDatabase("", window.location.href);
         return;
       }
-
-      const delay = Math.floor(Math.random() * (15000 - 8000)) + 8000;
-      if (index >= connectButtons.length) {
-        goToNextPage(delay);
-      } else {
-        setTimeout(() => clickNext(), delay);
-      }
+      const delay = Math.floor(Math.random() * 7000) + 8000;
+      if (index >= connectButtons.length) goToNextPage(delay);
+      else setTimeout(clickNext, delay);
     }
   }, 700);
 }
 
-/* ============================
-   INSERT MESSAGE
-============================= */
 function insertMessage() {
-  console.log("✏️ Inserting message...");
   let tries = 0;
-  const interval = setInterval(() => {
+  const iv = setInterval(() => {
     tries++;
-
-    const regularTextarea = document.querySelector("textarea");
-    if (regularTextarea) {
-      clearInterval(interval);
-      fillMessage(regularTextarea);
-      setTimeout(() => clickSend(), 2000);
+    const ta = document.querySelector("textarea");
+    if (ta) {
+      clearInterval(iv);
+      fillMessage(ta);
+      setTimeout(clickSend, 2000);
       return;
     }
-
     const host = document.querySelector("#interop-outlet");
     if (host?.shadowRoot) {
-      const textarea = host.shadowRoot.querySelector("textarea");
-      if (textarea) {
-        clearInterval(interval);
-        fillMessage(textarea);
-        setTimeout(() => clickSend(), 2000);
+      const sta = host.shadowRoot.querySelector("textarea");
+      if (sta) {
+        clearInterval(iv);
+        fillMessage(sta);
+        setTimeout(clickSend, 2000);
         return;
       }
     }
-
     if (tries > 20) {
-      console.log("❌ Textarea not found — trying send anyway");
-      clearInterval(interval);
+      clearInterval(iv);
       clickSend();
     }
   }, 700);
 }
 
-function fillMessage(textarea) {
-  let firstName = window.currentFirstName || "there";
-  firstName =
-    firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
-  const msg = window.campaignMessage || DEFAULT_MESSAGE;
-  const finalMessage = msg
-    .replace("{firstName}", firstName)
-    .replace("{{firstName}}", firstName);
-  textarea.focus();
-  textarea.value = finalMessage;
-  textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  textarea.dispatchEvent(new Event("change", { bubbles: true }));
-  console.log("✅ Message inserted for:", firstName);
+function fillMessage(ta) {
+  let fn = window.currentFirstName || "there";
+  fn = fn.charAt(0).toUpperCase() + fn.slice(1).toLowerCase();
+  const msg = (window.campaignMessage || DEFAULT_MESSAGE)
+    .replace("{firstName}", fn)
+    .replace("{{firstName}}", fn);
+  ta.focus();
+  ta.value = msg;
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+  ta.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-/* ============================
-   CLICK SEND
-============================= */
 function clickSend() {
-  console.log("📨 Looking for Send button...");
   let tries = 0;
-  const interval = setInterval(() => {
+  const iv = setInterval(() => {
     tries++;
-
-    const allBtns = Array.from(document.querySelectorAll("button"));
-    const sendBtn = allBtns.find((btn) => {
-      const text = btn.innerText?.toLowerCase().trim();
-      return (
-        text === "send" ||
-        text?.includes("send without") ||
-        text?.includes("send now")
-      );
-    });
+    const sendBtn = Array.from(document.querySelectorAll("button")).find(
+      (b) => {
+        const t = b.innerText?.toLowerCase().trim();
+        return t === "send" || t?.includes("send without");
+      },
+    );
     if (sendBtn) {
-      console.log("✅ Send FOUND in DOM");
-      clearInterval(interval);
+      clearInterval(iv);
       sendBtn.click();
       if (isBulkMode) {
         sentCount++;
         index++;
-        console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
-      } else {
-        console.log(`✅ Single connect sent!`);
       }
       afterSend();
       return;
     }
-
     const host = document.querySelector("#interop-outlet");
     if (host?.shadowRoot) {
-      const shadowBtns = Array.from(host.shadowRoot.querySelectorAll("button"));
-      const shadowSend = shadowBtns.find((b) => {
-        const text = b.innerText?.toLowerCase().trim();
-        return (
-          text === "send" ||
-          text?.includes("send without") ||
-          text?.includes("send now")
-        );
-      });
-      if (shadowSend) {
-        console.log("✅ Send FOUND in shadow DOM");
-        clearInterval(interval);
-        shadowSend.click();
+      const ss = Array.from(host.shadowRoot.querySelectorAll("button")).find(
+        (b) => {
+          const t = b.innerText?.toLowerCase().trim();
+          return t === "send" || t?.includes("send without");
+        },
+      );
+      if (ss) {
+        clearInterval(iv);
+        ss.click();
         if (isBulkMode) {
           sentCount++;
           index++;
-          console.log(`🎉 Sent! 📊 ${sentCount} / ${MAX_CONNECTS}`);
-        } else {
-          console.log(`✅ Single connect sent!`);
         }
         afterSend();
         return;
       }
     }
-
     if (tries > 20) {
-      console.log("❌ Send not found");
-      clearInterval(interval);
+      clearInterval(iv);
       index++;
       afterSend();
     }
   }, 700);
 }
 
-/* ============================
-   AFTER SEND
-============================= */
 function afterSend() {
   if (isBulkMode) {
     saveBulkContact();
+    const delay =
+      Math.floor(Math.random() * (MAX_DELAY - MIN_DELAY)) + MIN_DELAY;
+    if (sentCount >= MAX_CONNECTS) {
+      isBulkMode = false;
+      return;
+    }
+    if (index >= connectButtons.length) goToNextPage(delay);
+    else setTimeout(clickNext, delay);
   } else {
-    // Single / sequence mode — save contact to DB
     saveContactToDatabase("", window.location.href);
-    console.log("✅ Single/Campaign connect done");
-    return;
-  }
-
-  const delay = Math.floor(Math.random() * (18000 - 10000)) + 10000;
-
-  if (sentCount >= MAX_CONNECTS) {
-    console.log("🎉 Max connects reached — stopping");
-    isBulkMode = false;
-    return;
-  }
-
-  if (index >= connectButtons.length) {
-    goToNextPage(delay);
-  } else {
-    setTimeout(() => clickNext(), delay);
+    fetch("http://localhost:3000/api/contacts/update-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        linkedinUrl: window.location.href,
+        status: "CONNECTED",
+      }),
+    }).catch(() => {});
   }
 }
 
-/* ============================
-   PAGINATION
-============================= */
 function goToNextPage(delay) {
   currentPage++;
   const url = new URL(window.location.href);
@@ -766,219 +864,178 @@ function goToNextPage(delay) {
     sessionStorage.getItem("prosp_keywords") ||
     "";
   const cleanUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(keywords)}&page=${currentPage + 1}`;
-
   sessionStorage.setItem("prosp_bulk_running", "true");
   sessionStorage.setItem("prosp_sent_count", sentCount.toString());
   sessionStorage.setItem("prosp_page", currentPage.toString());
   sessionStorage.setItem("prosp_keywords", keywords);
-
   setTimeout(() => {
     window.open(cleanUrl, "_self", "noopener");
   }, delay);
 }
 
-/* ============================
-   AUTO-RESUME after navigation
-============================= */
 setTimeout(() => {
   if (sessionStorage.getItem("prosp_bulk_running") === "true") {
-    console.log("🔄 Auto-resuming bulk connect...");
     isBulkMode = true;
     startBulkConnect();
   }
 }, 3000);
 
-/* ============================
-   SAVE CONTACT TO DATABASE
-   - Called for single & sequence connects
-   - Extracts all data from current profile page
-   - Dispatches to bridge.js → background.js → API
-============================= */
 async function saveContactToDatabase(name, profileUrl) {
   try {
-    let fullName = "";
-    let firstName = "";
-    let lastName = "";
-    let position = "";
-    let location = "";
-    let company = "";
-    let avatar = "";
-
-    // --- Name (title is most reliable) ---
-    const title = document.title;
-    if (title && title.includes("|")) {
-      fullName = title.split("|")[0].replace("LinkedIn", "").trim();
-    }
-    if (!fullName) {
-      const h1 = document.querySelector("h1");
-      if (h1?.innerText?.trim()) {
-        fullName = h1.innerText.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
-      }
-    }
-    if (!fullName) {
-      const SKIP = [
-        "Skip to main content",
-        "Home",
-        "My Network",
-        "Jobs",
-        "Messaging",
-        "Notifications",
-        "Me",
-        "For Business",
-        "Learning",
-      ];
-      const bodyLines = document.body.innerText
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l.length > 2);
-      fullName =
-        bodyLines.find((l) => !SKIP.includes(l) && l.length < 80) || "Unknown";
-    }
-
-    firstName = fullName.split(" ")[0] || "Unknown";
-    lastName = fullName.split(" ").slice(1).join(" ") || "";
-
-    // --- Headline → position + company (innerText line parsing — no CSS selectors) ---
-    const fullText = document.body.innerText;
-    const lines = fullText
-      .split("\n")
-      .map((l) => l.replace(/\s+/g, " ").trim())
-      .filter((l) => l.length > 0);
-
-    const NOISE = [
-      "More",
-      "Message",
-      "Connect",
-      "Follow",
-      "- 3rd",
-      "- 2nd",
-      "- 1st",
-      "About",
-      "Contact info",
-      "· 3rd",
-      "· 2nd",
-      "· 1st",
-    ];
-    const nameIndex = lines.findIndex(
-      (l) => l === fullName || l.startsWith(fullName.split(" ")[0]),
-    );
-
-    let rawHeadline = "";
-    if (nameIndex !== -1) {
-      for (
-        let i = nameIndex + 1;
-        i < Math.min(nameIndex + 5, lines.length);
-        i++
-      ) {
-        const line = lines[i];
-        if (NOISE.some((n) => line.includes(n))) continue;
-        if (line.length < 3 || line.length > 200) continue;
-        rawHeadline = line;
-        break;
-      }
-    }
-
-    if (rawHeadline) {
-      const parsed = parsePositionCompany(rawHeadline);
-      position = parsed.position;
-      company = parsed.company;
-    }
-
-    // --- Company fallback: Experience section ---
-    if (!company) {
-      const expIdx = lines.findIndex((l) => l === "Experience");
-      if (expIdx !== -1) {
-        for (let i = expIdx + 1; i < Math.min(expIdx + 6, lines.length); i++) {
-          const line = lines[i];
-          if (
-            line.length > 3 &&
-            line.length < 100 &&
-            !NOISE.some((n) => line.includes(n)) &&
-            !line.match(/^\d/) &&
-            line !== fullName
-          ) {
-            company = line;
-            break;
-          }
-        }
-      }
-    }
-
-    // Clean company
-    if (company) {
-      company = company
-        .replace(/Contact info/gi, "")
-        .replace(/connections?/gi, "")
-        .trim();
-      if (company.length > 100) company = "";
-    }
-
-    // --- Location ---
-    const LOCATION_KEYWORDS = [
-      "India",
-      "Bengaluru",
-      "Chennai",
-      "Mumbai",
-      "Delhi",
-      "Hyderabad",
-      "Pune",
-      "Canada",
-      "United States",
-      "United Kingdom",
-      "Singapore",
-      "Rajasthan",
-      "Karnataka",
-      "Maharashtra",
-      "Bangalore",
-      "Uttar Pradesh",
-      "Bihar",
-      "Gujarat",
-      "Tamil Nadu",
-      "Andhra Pradesh",
-      "Telangana",
-    ];
-
-    const locationLine = lines.find(
-      (l) =>
-        l.length < 100 &&
-        LOCATION_KEYWORDS.some((kw) => l.includes(kw)) &&
-        !l.includes("Connect") &&
-        !l.includes("Follow"),
-    );
-    if (locationLine) location = locationLine;
-
-    // --- Avatar ---
-    const avatarEl =
-      document.querySelector("img.pv-top-card-profile-picture__image") ||
-      document.querySelector(".pv-top-card-profile-picture img") ||
-      document.querySelector("img[data-delayed-url]") ||
-      document.querySelector("img.presence-entity__image");
-    if (avatarEl) {
-      avatar = avatarEl.src || avatarEl.getAttribute("data-delayed-url") || "";
-    }
-
-    const payload = {
-      firstName,
-      lastName,
-      fullName,
-      linkedinUrl: profileUrl || window.location.href,
-      position,
-      company,
-      location,
-      avatar,
-      userEmail: "",
-    };
-
-    console.log("🚀 Preparing to save:", payload);
-
+    let fullName = document.title.includes("|")
+      ? document.title.split("|")[0].replace("LinkedIn", "").trim()
+      : document.querySelector("h1")?.innerText?.trim() || "Unknown";
+    const firstName = fullName.split(" ")[0] || "Unknown";
+    const lastName = fullName.split(" ").slice(1).join(" ") || "";
     window.dispatchEvent(
-      new CustomEvent("prosp_save_contact", { detail: payload }),
+      new CustomEvent("prosp_save_contact", {
+        detail: {
+          firstName,
+          lastName,
+          fullName,
+          linkedinUrl: profileUrl || window.location.href,
+          position: "",
+          company: "",
+          location: "",
+          avatar: "",
+          userEmail: "",
+        },
+      }),
     );
-
-    console.log("📡 Dispatched to bridge for storage");
   } catch (err) {
-    console.error("❌ saveContactToDatabase failed:", err);
+    console.error("❌ saveContactToDatabase:", err);
   }
 }
 
-window.clickConnectButton = clickConnectButton;
+/* ============================
+   MESSAGE LISTENERS
+============================= */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log("📩 CONTENT MESSAGE RECEIVED:", message);
+  if (message.action === "scrape_search_results") {
+    console.log(
+      `🚀 STARTING IMPORT | type: ${message.importType || "linkedin_search"}`,
+    );
+    const importType = message.importType || "linkedin_search";
+    const campaignId = message.campaignId;
+
+    // Route to correct scraper based on importType
+    let promise;
+    if (importType === "linkedin_event") {
+      promise = scrapeEventPage(campaignId);
+    } else if (importType === "linkedin_post") {
+      promise = scrapePostPage(campaignId);
+    } else if (importType === "linkedin_group") {
+      promise = scrapeGroupPage(campaignId);
+    } else {
+      // linkedin_search, sales_navigator, lead_finder
+      promise = scrapeSearchResults(campaignId);
+    }
+
+    promise.then((result) => sendResponse(result || { success: true }));
+    return true;
+  }
+  if (message.action === "connect") {
+    isBulkMode = false;
+    if (message.message) window.campaignMessage = message.message;
+    clickConnectButton();
+    sendResponse({ success: true });
+    return true;
+  }
+  if (message.action === "start_bulk_connect") {
+    isBulkMode = true;
+    startBulkConnect();
+    sendResponse({ success: true });
+    return true;
+  }
+  return true;
+});
+
+window.addEventListener("prosp_action", (event) => {
+  const msg = event.detail;
+  if (msg.action === "connect") {
+    isBulkMode = false;
+    if (msg.message) window.campaignMessage = msg.message;
+    clickConnectButton();
+  }
+  if (msg.action === "start_bulk_connect") {
+    isBulkMode = true;
+    startBulkConnect();
+  }
+  if (msg.action === "scrape_search_results")
+    scrapeSearchResults(msg.campaignId);
+});
+
+/* ============================
+   EXTRA SCRAPERS for Event / Post / Group
+   These are triggered by importType in the message
+============================= */
+
+// ── LinkedIn Event: scrape attendees ──
+async function scrapeEventPage(campaignId) {
+  console.log("🎪 Scraping LinkedIn Event attendees...");
+  await sleep(4000);
+
+  // Navigate to the attendees tab if not already there
+  const attendeeLinks = [
+    ...Array.from(document.querySelectorAll('a[href*="attendees"]')),
+    ...Array.from(document.querySelectorAll("a")).filter((a) =>
+      a.innerText?.toLowerCase().includes("attendee"),
+    ),
+  ];
+  if (attendeeLinks.length > 0) {
+    console.log("➡️ Clicking attendees link");
+    attendeeLinks[0].click();
+    await sleep(3000);
+  }
+
+  return scrapeSearchResults(campaignId);
+}
+
+// ── LinkedIn Post: scrape likers + commenters ──
+async function scrapePostPage(campaignId) {
+  console.log("📝 Scraping LinkedIn Post reactions/comments...");
+  await sleep(4000);
+
+  // Try to open reactions modal
+  const reactionBtns = Array.from(
+    document.querySelectorAll("button, span"),
+  ).filter((el) => {
+    const t = el.innerText?.toLowerCase();
+    return (
+      t?.includes("like") ||
+      t?.includes("reaction") ||
+      t?.match(/^\d+\s*(like|reaction)/)
+    );
+  });
+  if (reactionBtns.length > 0) {
+    console.log("👍 Clicking reactions button");
+    reactionBtns[0].click();
+    await sleep(2000);
+  }
+
+  // Scrape profile links visible in the modal or page
+  return scrapeSearchResults(campaignId);
+}
+
+// ── LinkedIn Group: scrape members ──
+async function scrapeGroupPage(campaignId) {
+  console.log("👥 Scraping LinkedIn Group members...");
+  await sleep(4000);
+
+  // Navigate to members tab
+  const memberLinks = Array.from(document.querySelectorAll("a")).filter(
+    function (a) {
+      const href = a.href || "";
+      const text = a.innerText ? a.innerText.toLowerCase() : "";
+      return href.includes("/members") || text.includes("member");
+    },
+  );
+  if (memberLinks.length > 0) {
+    console.log("➡️ Navigating to members page");
+    window.location.href = memberLinks[0].href;
+    return; // page will reload, scrapeSearchResults handles the rest via sessionStorage
+  }
+
+  return scrapeSearchResults(campaignId);
+}

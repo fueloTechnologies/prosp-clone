@@ -7,22 +7,39 @@ const taskQueue: any[] = [];
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
     console.log("🚀 Extension task received:", body);
 
-    const task = {
+    // ✅ Handle different action types
+    const action = body.action || "execute_connection_request";
+
+    const task: any = {
       id: Date.now().toString(),
-      action: "execute_connection_request",
-      linkedinUrl: body.linkedinUrl,
-      message: body.message,
+      action,
       createdAt: new Date(),
     };
 
+    // Connection request
+    if (action === "execute_connection_request") {
+      task.linkedinUrl = body.linkedinUrl;
+      task.message = body.message;
+    }
+
+    // Scrape URL (LinkedIn Search, Sales Nav, Event, Post, Group)
+    if (action === "scrape_url") {
+      task.url = body.url;
+      task.type = body.type;
+      task.campaignId = body.campaignId;
+    }
+
+    // Lead finder
+    if (action === "lead_finder") {
+      task.filters = body.filters;
+      task.campaignId = body.campaignId;
+    }
+
     taskQueue.push(task);
+    console.log(`📋 Task queued: ${task.id} | action: ${action}`);
 
-    console.log(`📋 Task queued: ${task.id}, Queue size: ${taskQueue.length}`);
-
-    // ✅ Don't wait — just confirm queued, extension picks up via polling
     return NextResponse.json({ success: true, taskId: task.id });
   } catch (error) {
     console.error("❌ Extension bridge error:", error);

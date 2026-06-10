@@ -16,16 +16,16 @@ export async function executeConnectionRequest({
       return { success: false };
     }
 
-    // Queue connection request for extension to pick up
+    // ✅ action must be "execute_connection_request" so background.js handles it
     const response = await fetch(
       "http://localhost:3000/api/extension/connect",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          action: "execute_connection_request",
           linkedinUrl: linkedInUrl,
           message: finalContent || step.content || "",
-          action: "connection_request",
         }),
       },
     );
