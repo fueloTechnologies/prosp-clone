@@ -1,3 +1,4 @@
+// src/lib/sequence-engine/executors/email.ts
 import { Resend } from "resend";
 import prisma from "@/lib/prisma";
 
@@ -9,36 +10,26 @@ export async function executeEmail({
   userId,
   step,
   finalContent,
+  finalSubject,
 }: any) {
+  console.log("📧 Executing EMAIL for:", cc.contact.firstName);
+
+  const contactEmail = cc.contact?.email;
+  if (!contactEmail) {
+    // ✅ Graceful skip — no email on contact, don't fail the whole sequence
+    console.log("⚠️ EMAIL skipped — contact has no email address");
+    return { success: true, skipped: true };
+  }
+
+  // ✅ finalSubject is pre-personalized by the runner; fall back to raw step.subject
+  const subject =
+    finalSubject || step.subject || `Hi ${cc.contact.firstName || "there"}`;
+  const fromEmail = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
+
   try {
-    console.log("📧 Sending email to:", cc.contact.firstName);
-
-    const email = cc.contact.email;
-    if (!email) {
-      console.log("❌ No email address — skipping");
-      return { success: false };
-    }
-
-    const subject = step.subject
-      ? step.subject
-          .replace(
-            /{{firstName}}/g,
-            (cc.contact.firstName || "").split(" ")[0].trim(),
-          )
-          .replace(/{{lastName}}/g, (cc.contact.lastName || "").trim())
-          .replace(
-            /{{company}}/g,
-            (cc.contact.company || "").split("·")[0].trim(),
-          )
-          .replace(
-            /{{position}}/g,
-            (cc.contact.position || "").split("·")[0].trim(),
-          )
-      : `Hi ${cc.contact.firstName || "there"}`;
-
     const { data, error } = await resend.emails.send({
-      from: "Prosp <onboarding@resend.dev>", // swap with your verified domain later
-      to: email,
+      from: `Prosp <${fromEmail}>`,
+      to: contactEmail,
       subject,
       text: finalContent,
       html: `<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:#111;">${finalContent.replace(/\n/g, "<br/>")}</div>`,
@@ -49,7 +40,7 @@ export async function executeEmail({
       return { success: false };
     }
 
-    console.log("✅ Email sent, id:", data?.id);
+    console.log("✅ EMAIL sent to:", contactEmail, "| id:", data?.id);
 
     await prisma.message.create({
       data: {
@@ -57,13 +48,19 @@ export async function executeEmail({
         userId,
         direction: "SENT",
         type: "TEXT",
-        content: finalContent,
+        content: `[EMAIL] ${subject}\n\n${finalContent}`,
+        sentAt: new Date(),
       },
     });
 
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { lastMessageAt: new Date() },
+    });
+
     return { success: true };
-  } catch (error) {
-    console.error("❌ Email executor failed:", error);
+  } catch (err) {
+    console.error("❌ EMAIL executor threw:", err);
     return { success: false };
   }
 }

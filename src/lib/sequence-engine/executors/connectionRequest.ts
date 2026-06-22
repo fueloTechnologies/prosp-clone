@@ -1,34 +1,33 @@
+// src/lib/sequence-engine/executors/connectionRequest.ts
 import prisma from "@/lib/prisma";
+
+const APP_URL =
+  process.env.NEXTAUTH_URL || process.env.APP_URL || "http://localhost:3000";
 
 export async function executeConnectionRequest({
   cc,
   conversation,
   userId,
-  step,
   finalContent,
 }: any) {
+  console.log("🔗 Executing CONNECTION_REQUEST for:", cc.contact.firstName);
+
+  const linkedInUrl = cc.contact.linkedInUrl || cc.contact.linkedinUrl;
+  if (!linkedInUrl) {
+    console.log("❌ No LinkedIn URL — skipping");
+    return { success: false };
+  }
+
   try {
-    console.log("🔗 Sending connection request to:", cc.contact.firstName);
-
-    const linkedInUrl = cc.contact.linkedInUrl || cc.contact.linkedinUrl;
-    if (!linkedInUrl) {
-      console.log("❌ No LinkedIn URL — skipping");
-      return { success: false };
-    }
-
-    // ✅ action must be "execute_connection_request" so background.js handles it
-    const response = await fetch(
-      "http://localhost:3000/api/extension/connect",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "execute_connection_request",
-          linkedinUrl: linkedInUrl,
-          message: finalContent || step.content || "",
-        }),
-      },
-    );
+    const response = await fetch(`${APP_URL}/api/extension/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "execute_connection_request",
+        linkedinUrl: linkedInUrl,
+        message: finalContent,
+      }),
+    });
 
     if (!response.ok) {
       console.error("❌ Extension API error:", response.status);
@@ -40,14 +39,16 @@ export async function executeConnectionRequest({
         conversationId: conversation.id,
         userId,
         direction: "SENT",
-        content: finalContent || step.content || "Connection request sent",
+        type: "TEXT",
+        content: finalContent || "Connection request sent",
+        sentAt: new Date(),
       },
     });
 
-    console.log("✅ Connection request queued");
+    console.log("✅ CONNECTION_REQUEST queued");
     return { success: true };
-  } catch (error) {
-    console.error("❌ Connection request failed:", error);
+  } catch (err) {
+    console.error("❌ CONNECTION_REQUEST failed:", err);
     return { success: false };
   }
 }

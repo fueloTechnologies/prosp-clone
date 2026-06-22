@@ -1,3 +1,4 @@
+// src/app/api/campaigns/[id]/launch/route.ts
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
@@ -26,8 +27,14 @@ export async function POST(
       },
     });
 
-    // ✅ Trigger runner immediately so first step runs right away
-    fetch("http://localhost:3000/api/runner").catch((err) =>
+    // ✅ FIX: use APP_URL env var instead of hardcoded localhost
+    // This works both locally and on Vercel
+    const appUrl =
+      process.env.NEXTAUTH_URL ||
+      process.env.APP_URL ||
+      "http://localhost:3000";
+
+    fetch(`${appUrl}/api/runner`).catch((err) =>
       console.error("Runner trigger failed:", err),
     );
 

@@ -1,6 +1,7 @@
 "use client";
+// src/components/sequences/SequenceBuilder.tsx
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import StepTypePicker from "./StepTypePicker";
 import { replaceVariables } from "@/lib/variables";
 import CampaignSettingsModal from "./CampaignSettingsModal";
@@ -13,6 +14,30 @@ type Step = {
   content: string;
   subject?: string;
   delay?: number;
+};
+
+const STEP_ICONS: Record<string, string> = {
+  CONNECTION_REQUEST: "🔗",
+  MESSAGE: "📩",
+  FOLLOW_UP: "💬",
+  EMAIL: "📧",
+  WAIT: "⏳",
+};
+
+const STEP_COLORS: Record<string, string> = {
+  CONNECTION_REQUEST: "bg-violet-50 border-violet-200",
+  MESSAGE: "bg-blue-50 border-blue-200",
+  FOLLOW_UP: "bg-indigo-50 border-indigo-200",
+  EMAIL: "bg-amber-50 border-amber-200",
+  WAIT: "bg-gray-50 border-gray-200",
+};
+
+const STEP_BADGE: Record<string, string> = {
+  CONNECTION_REQUEST: "bg-violet-100 text-violet-700",
+  MESSAGE: "bg-blue-100 text-blue-700",
+  FOLLOW_UP: "bg-indigo-100 text-indigo-700",
+  EMAIL: "bg-amber-100 text-amber-700",
+  WAIT: "bg-gray-100 text-gray-600",
 };
 
 export default function SequenceBuilder({
@@ -33,6 +58,12 @@ export default function SequenceBuilder({
   const [showPicker, setShowPicker] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [savingSteps, setSavingSteps] = useState<Record<string, boolean>>({});
+
+  // ✅ FIX: debounce timers per step to avoid API spam on every keystroke
+  const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>(
+    {},
+  );
 
   /* =========================
      LOAD STEPS
@@ -51,20 +82,7 @@ export default function SequenceBuilder({
         const sorted = data.sort(
           (a: any, b: any) => (a.order || 0) - (b.order || 0),
         );
-        const fixedSteps = sorted.map((step: any) => {
-          if (
-            step.type !== "WAIT" &&
-            (!step.content || step.content.trim() === "")
-          ) {
-            return {
-              ...step,
-              content:
-                "hi {{firstName}} {{lastName}} from {{company}} — {{position}}",
-            };
-          }
-          return step;
-        });
-        setSteps(fixedSteps);
+        setSteps(sorted);
       } else {
         setSteps([]);
       }
@@ -129,7 +147,7 @@ export default function SequenceBuilder({
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        steps: items.map((step, index) => ({ id: step.id, order: index })),
+        steps: items.map((step, index) => ({ id: step.id, order: index + 1 })),
       }),
     });
   };
@@ -149,6 +167,7 @@ export default function SequenceBuilder({
             type === "WAIT"
               ? ""
               : "hi {{firstName}} {{lastName}} from {{company}} — {{position}}",
+          subject: type === "EMAIL" ? "Following up, {{firstName}}" : null,
           delay: type === "WAIT" ? 1 : 0,
         }),
       });
@@ -176,22 +195,41 @@ export default function SequenceBuilder({
   };
 
   /* =========================
-     UPDATE STEP  ✅ FIXED PATH
+     UPDATE STEP (debounced) ✅ FIXED
   ========================== */
-  const updateStep = async (stepId: string, data: Partial<Step>) => {
-    try {
-      await fetch(`/api/campaigns/${campaign.id}/steps/${stepId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-    } catch (error) {
-      console.error("Update step error:", error);
-    }
-  };
+  const updateStepDebounced = useCallback(
+    (stepId: string, data: Partial<Step>) => {
+      // Update local state immediately for responsive UI
+      setSteps((prev) =>
+        prev.map((s) => (s.id === stepId ? { ...s, ...data } : s)),
+      );
+
+      // Debounce the API call — wait 600ms after last keystroke
+      if (debounceTimers.current[stepId]) {
+        clearTimeout(debounceTimers.current[stepId]);
+      }
+
+      setSavingSteps((prev) => ({ ...prev, [stepId]: true }));
+
+      debounceTimers.current[stepId] = setTimeout(async () => {
+        try {
+          await fetch(`/api/campaigns/${campaign.id}/steps/${stepId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+        } catch (error) {
+          console.error("Update step error:", error);
+        } finally {
+          setSavingSteps((prev) => ({ ...prev, [stepId]: false }));
+        }
+      }, 600);
+    },
+    [campaign?.id],
+  );
 
   /* =========================
-     DELETE STEP  ✅ FIXED PATH
+     DELETE STEP
   ========================== */
   const deleteStep = async (id: string) => {
     try {
@@ -209,20 +247,44 @@ export default function SequenceBuilder({
   ========================== */
   const launchCampaign = async () => {
     if (!campaign?.id) return;
+    if (
+      !confirm(
+        "Launch this campaign? All contacts will start receiving messages.",
+      )
+    )
+      return;
     try {
-      await fetch(`/api/campaigns/${campaign.id}/launch`, { method: "POST" });
-      const runnerData = await fetch("/api/runner").then((r) => r.json());
-      console.log("Runner response:", runnerData);
-      alert("Campaign Launched 🚀");
+      const res = await fetch(`/api/campaigns/${campaign.id}/launch`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        alert("Campaign Launched 🚀");
+        onUpdate?.({ ...campaign, status: "ACTIVE" });
+      } else {
+        alert("Launch failed. Please try again.");
+      }
     } catch (error) {
       console.error("Launch error:", error);
     }
   };
 
+  /* =========================
+     GET PREVIEW CONTACT
+  ========================== */
+  const previewContact =
+    campaignContacts.length > 0
+      ? campaignContacts[previewIndex]?.contact
+      : {
+          firstName: "John",
+          lastName: "Doe",
+          company: "Acme Corp",
+          position: "CEO",
+        };
+
   if (loading && steps.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        Loading steps...
+        <div className="text-sm text-gray-400">Loading steps...</div>
       </div>
     );
   }
@@ -232,31 +294,45 @@ export default function SequenceBuilder({
       {/* HEADER */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight text-gray-900">
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900">
             {campaign?.name}
           </h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {campaignContacts.length} contacts
-          </p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-sm text-gray-500">
+              {campaignContacts.length} contact
+              {campaignContacts.length !== 1 ? "s" : ""}
+            </p>
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                campaign?.status === "ACTIVE"
+                  ? "bg-green-100 text-green-700"
+                  : campaign?.status === "PAUSED"
+                    ? "bg-yellow-100 text-yellow-700"
+                    : "bg-gray-100 text-gray-600"
+              }`}
+            >
+              {campaign?.status || "DRAFT"}
+            </span>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowImportModal(true)}
-            className="h-11 px-5 rounded-2xl border border-[#ececf4] bg-white hover:bg-[#fafafe] transition-all font-medium"
+            className="h-9 px-4 rounded-xl border border-[#ececf4] bg-white hover:bg-[#fafafe] transition-all text-sm font-medium text-gray-700"
           >
-            Add Contacts
+            + Add Contacts
           </button>
           <button
             onClick={() => setShowSettings(true)}
-            className="h-11 px-5 rounded-2xl border border-[#ececf4] bg-white hover:bg-[#fafafe] transition-all font-medium"
+            className="h-9 px-4 rounded-xl border border-[#ececf4] bg-white hover:bg-[#fafafe] transition-all text-sm font-medium text-gray-700"
           >
             ⚙ Settings
           </button>
           <button
             onClick={launchCampaign}
-            className="h-11 px-5 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-lg shadow-violet-500/20 hover:scale-[1.02] transition-all duration-200"
+            className="h-9 px-4 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-sm font-semibold shadow-md shadow-violet-500/20 hover:opacity-90 transition-all duration-200"
           >
-            🚀 Launch Campaign
+            🚀 Launch
           </button>
         </div>
       </div>
@@ -283,6 +359,7 @@ export default function SequenceBuilder({
                     <img
                       src={cc.contact.avatar}
                       className="w-7 h-7 rounded-full object-cover"
+                      alt=""
                     />
                   ) : (
                     <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center text-xs font-semibold text-violet-600">
@@ -301,7 +378,7 @@ export default function SequenceBuilder({
                 </div>
                 <div className="flex items-center gap-2">
                   <span
-                    className={`text-xs px-2 py-0.5 rounded-full
+                    className={`text-xs px-2 py-0.5 rounded-full font-medium
                     ${cc.status === "COMPLETED" ? "bg-green-100 text-green-700" : ""}
                     ${cc.status === "IN_PROGRESS" ? "bg-blue-100 text-blue-700" : ""}
                     ${cc.status === "PENDING" ? "bg-yellow-100 text-yellow-700" : ""}
@@ -313,8 +390,7 @@ export default function SequenceBuilder({
                   </span>
                   <button
                     onClick={() => removeContact(cc.contact.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-red-500 p-1 rounded"
-                    title="Remove contact"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-red-500 p-1 rounded text-xs"
                   >
                     ✕
                   </button>
@@ -325,63 +401,97 @@ export default function SequenceBuilder({
         </div>
       )}
 
-      {/* DRAG AREA */}
+      {/* STEPS */}
       <DragDropContext onDragEnd={onDragEnd}>
         <Droppable droppableId="steps">
           {(provided) => (
             <div
               ref={provided.innerRef}
               {...provided.droppableProps}
-              className="space-y-6"
+              className="space-y-3"
             >
               {steps.map((step, index) => (
                 <Draggable key={step.id} draggableId={step.id} index={index}>
-                  {(provided) => (
-                    <div ref={provided.innerRef} {...provided.draggableProps}>
+                  {(provided, snapshot) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.draggableProps}
+                      className={`transition-shadow ${snapshot.isDragging ? "shadow-xl" : ""}`}
+                    >
+                      {/* Drag handle */}
                       <div
                         {...provided.dragHandleProps}
-                        className="cursor-move text-xs text-gray-400 mb-1"
+                        className="cursor-grab active:cursor-grabbing flex items-center gap-1 text-xs text-gray-300 hover:text-gray-400 mb-1 select-none w-fit"
                       >
-                        ☰ Drag
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 12 12"
+                          fill="currentColor"
+                        >
+                          <circle cx="3" cy="3" r="1.2" />
+                          <circle cx="9" cy="3" r="1.2" />
+                          <circle cx="3" cy="6" r="1.2" />
+                          <circle cx="9" cy="6" r="1.2" />
+                          <circle cx="3" cy="9" r="1.2" />
+                          <circle cx="9" cy="9" r="1.2" />
+                        </svg>
+                        Drag
                       </div>
-                      <div className="border rounded-lg p-4 bg-white">
-                        <div className="flex justify-between mb-2">
-                          <span className="text-xs font-semibold text-gray-500">
-                            Step {index + 1} — {step.type}
-                          </span>
+
+                      <div
+                        className={`border rounded-2xl p-5 bg-white transition-all ${
+                          STEP_COLORS[step.type] || "border-gray-200"
+                        }`}
+                      >
+                        {/* Step header */}
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">
+                              {STEP_ICONS[step.type] || "⚡"}
+                            </span>
+                            <span
+                              className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                STEP_BADGE[step.type] ||
+                                "bg-gray-100 text-gray-600"
+                              }`}
+                            >
+                              Step {index + 1} — {step.type.replace(/_/g, " ")}
+                            </span>
+                            {savingSteps[step.id] && (
+                              <span className="text-xs text-gray-400 animate-pulse">
+                                Saving…
+                              </span>
+                            )}
+                          </div>
                           <button
                             onClick={() => deleteStep(step.id)}
-                            className="text-xs text-red-500 hover:underline"
+                            className="text-xs text-gray-400 hover:text-red-500 transition-colors px-2 py-1 rounded-lg hover:bg-red-50"
                           >
                             Delete
                           </button>
                         </div>
 
+                        {/* WAIT step */}
                         {step.type === "WAIT" ? (
                           <div className="flex items-center gap-3">
-                            <span className="text-sm">Wait</span>
+                            <span className="text-sm text-gray-600">Wait</span>
                             <input
                               type="number"
                               min={0}
-                              value={step.delay ?? 0}
+                              value={step.delay ?? 1}
                               onChange={(e) => {
                                 const value = Number(e.target.value);
-                                setSteps((prev) =>
-                                  prev.map((s) =>
-                                    s.id === step.id
-                                      ? { ...s, delay: value }
-                                      : s,
-                                  ),
-                                );
-                                updateStep(step.id, { delay: value });
+                                updateStepDebounced(step.id, { delay: value });
                               }}
-                              className="w-20 border rounded px-2 py-1"
+                              className="w-20 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-violet-300"
                             />
-                            <span className="text-sm">hours</span>
+                            <span className="text-sm text-gray-600">hours</span>
                           </div>
                         ) : (
                           <>
-                            <div className="flex flex-wrap gap-2 mb-2">
+                            {/* Variable chips */}
+                            <div className="flex flex-wrap gap-1.5 mb-3">
                               {[
                                 "firstName",
                                 "lastName",
@@ -394,61 +504,55 @@ export default function SequenceBuilder({
                                   onClick={() => {
                                     const newContent =
                                       (step.content || "") + ` {{${variable}}}`;
-                                    setSteps((prev) =>
-                                      prev.map((s) =>
-                                        s.id === step.id
-                                          ? { ...s, content: newContent }
-                                          : s,
-                                      ),
-                                    );
-                                    updateStep(step.id, {
+                                    updateStepDebounced(step.id, {
                                       content: newContent,
                                     });
                                   }}
-                                  className="text-xs px-2 py-1 border rounded bg-gray-50 hover:bg-gray-100"
+                                  className="text-xs px-2.5 py-1 border border-gray-200 rounded-full bg-white hover:bg-violet-50 hover:border-violet-300 hover:text-violet-700 transition-colors"
                                 >
                                   {variable}
                                 </button>
                               ))}
                             </div>
 
+                            {/* EMAIL subject field */}
                             {step.type === "EMAIL" && (
-                              <input
-                                type="text"
-                                placeholder="Email Subject"
-                                value={step.subject || ""}
-                                onChange={(e) => {
-                                  const subject = e.target.value;
-                                  setSteps((prev) =>
-                                    prev.map((s) =>
-                                      s.id === step.id ? { ...s, subject } : s,
-                                    ),
-                                  );
-                                  updateStep(step.id, { subject });
-                                }}
-                                className="w-full border rounded-lg px-3 py-2 mb-2 text-sm"
-                              />
+                              <div className="mb-3">
+                                <label className="block text-xs font-medium text-gray-500 mb-1">
+                                  Email Subject
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="e.g. Quick question, {{firstName}}"
+                                  value={step.subject || ""}
+                                  onChange={(e) => {
+                                    updateStepDebounced(step.id, {
+                                      subject: e.target.value,
+                                    });
+                                  }}
+                                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"
+                                />
+                              </div>
                             )}
 
+                            {/* Message body */}
                             <textarea
                               value={step.content || ""}
                               onChange={(e) => {
-                                const content = e.target.value;
-                                setSteps((prev) =>
-                                  prev.map((s) =>
-                                    s.id === step.id ? { ...s, content } : s,
-                                  ),
-                                );
-                                updateStep(step.id, { content });
+                                updateStepDebounced(step.id, {
+                                  content: e.target.value,
+                                });
                               }}
-                              className="w-full border rounded-lg p-3 min-h-[120px]"
+                              placeholder="Write your message…"
+                              className="w-full border border-gray-200 rounded-xl p-3 min-h-[110px] text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
                             />
 
+                            {/* Preview */}
                             {step.content && step.content.trim().length > 0 && (
-                              <div className="text-xs text-gray-500 mt-3 border-t pt-3">
+                              <div className="mt-4 border-t border-gray-100 pt-4">
                                 {campaignContacts.length > 0 && (
                                   <div className="mb-3">
-                                    <label className="block text-xs text-gray-500 mb-1">
+                                    <label className="block text-xs font-medium text-gray-500 mb-1.5">
                                       Preview As
                                     </label>
                                     <select
@@ -456,10 +560,10 @@ export default function SequenceBuilder({
                                       onChange={(e) =>
                                         setPreviewIndex(Number(e.target.value))
                                       }
-                                      className="border rounded-lg px-3 py-2 text-sm bg-white"
+                                      className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300"
                                     >
-                                      {campaignContacts.map((c, index) => (
-                                        <option key={c.id} value={index}>
+                                      {campaignContacts.map((c, idx) => (
+                                        <option key={c.id} value={idx}>
                                           {c.contact?.firstName}{" "}
                                           {c.contact?.lastName}
                                         </option>
@@ -467,18 +571,29 @@ export default function SequenceBuilder({
                                     </select>
                                   </div>
                                 )}
-                                <div className="font-medium mb-1">Preview</div>
-                                <div className="text-sm text-gray-800 bg-gray-50 rounded-lg p-3">
+
+                                {/* ✅ FIX: show subject preview for EMAIL */}
+                                {step.type === "EMAIL" && step.subject && (
+                                  <div className="mb-2">
+                                    <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                                      Subject
+                                    </span>
+                                    <div className="mt-1 text-sm text-gray-700 bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">
+                                      {replaceVariables(
+                                        step.subject,
+                                        previewContact,
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                                  Preview
+                                </span>
+                                <div className="mt-1 text-sm text-gray-800 bg-gray-50 rounded-xl p-3 border border-gray-100 whitespace-pre-wrap leading-relaxed">
                                   {replaceVariables(
                                     step.content,
-                                    campaignContacts.length > 0
-                                      ? campaignContacts[previewIndex]?.contact
-                                      : {
-                                          firstName: "John",
-                                          lastName: "Doe",
-                                          company: "Acme",
-                                          position: "CEO",
-                                        },
+                                    previewContact,
                                   )}
                                 </div>
                               </div>
@@ -500,9 +615,10 @@ export default function SequenceBuilder({
       <div className="mt-6">
         <button
           onClick={() => setShowPicker(true)}
-          className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+          className="flex items-center gap-2 px-5 py-2.5 border-2 border-dashed border-[#d7d7e4] rounded-2xl hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700 text-gray-500 text-sm font-medium transition-all"
         >
-          + Add Step
+          <span className="text-lg leading-none">+</span>
+          Add Step
         </button>
         <StepTypePicker
           isOpen={showPicker}
@@ -515,36 +631,36 @@ export default function SequenceBuilder({
       </div>
 
       {/* ACTIVITY TIMELINE */}
-      <div className="mt-10">
-        <h3 className="text-lg font-semibold mb-4">Activity</h3>
-        <div className="space-y-3">
-          {activity.length === 0 && (
-            <div className="text-sm text-gray-500">No activity yet</div>
-          )}
-          {activity.map((item) => (
-            <div key={item.id} className="border rounded-lg p-3 bg-white">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-sm">
-                    <div className="flex items-center gap-2">
-                      <span>
-                        {item.step?.type === "CONNECTION_REQUEST" && "🔗"}
-                        {item.step?.type === "MESSAGE" && "📩"}
-                        {item.step?.type === "FOLLOW_UP" && "💬"}
-                        {item.step?.type === "EMAIL" && "📧"}
-                        {item.step?.type === "WAIT" && "⏳"}
-                      </span>
-                      <span>{item.step?.type?.replaceAll("_", " ")}</span>
+      <div className="mt-12">
+        <h3 className="text-base font-semibold text-gray-800 mb-4">Activity</h3>
+        <div className="space-y-2">
+          {activity.length === 0 ? (
+            <div className="text-sm text-gray-400 py-8 text-center border border-dashed border-gray-200 rounded-2xl">
+              No activity yet. Launch the campaign to get started.
+            </div>
+          ) : (
+            activity.map((item) => (
+              <div
+                key={item.id}
+                className="border border-[#ececf4] rounded-2xl p-4 bg-white flex items-center justify-between"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-base">
+                    {STEP_ICONS[item.step?.type] || "⚡"}
+                  </span>
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">
+                      {item.step?.type?.replace(/_/g, " ")}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {item.campaignContact?.contact?.firstName}{" "}
+                      {item.campaignContact?.contact?.lastName}
                     </div>
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {item.campaignContact?.contact?.firstName}{" "}
-                    {item.campaignContact?.contact?.lastName}
-                  </div>
                 </div>
-                <div className="mt-2">
+                <div className="flex items-center gap-4">
                   <span
-                    className={`text-xs px-2 py-1 rounded-full
+                    className={`text-xs px-2.5 py-1 rounded-full font-medium
                     ${item.status === "COMPLETED" ? "bg-green-100 text-green-700" : ""}
                     ${item.status === "FAILED" ? "bg-red-100 text-red-700" : ""}
                     ${item.status === "PENDING" ? "bg-yellow-100 text-yellow-700" : ""}
@@ -552,15 +668,15 @@ export default function SequenceBuilder({
                   >
                     {item.status}
                   </span>
-                </div>
-                <div className="text-xs text-gray-400">
-                  {item.executedAt
-                    ? new Date(item.executedAt).toLocaleString()
-                    : "Pending"}
+                  <div className="text-xs text-gray-400">
+                    {item.executedAt
+                      ? new Date(item.executedAt).toLocaleString()
+                      : "Pending"}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 
@@ -580,7 +696,6 @@ export default function SequenceBuilder({
           campaignId={campaign.id}
           onClose={() => setShowImportModal(false)}
           onImported={async (count) => {
-            console.log(`✅ Live count update: ${count} contacts`);
             await loadContacts();
           }}
         />

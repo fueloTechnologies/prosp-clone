@@ -1,4 +1,6 @@
-export async function executeWait({ cc, step, lastExecution }: any) {
+// src/lib/sequence-engine/executors/wait.ts
+
+export async function executeWait({ step, lastExecution }: any) {
   console.log("⏳ WAIT step — checking if wait period is over");
 
   if (!lastExecution?.executedAt) {

@@ -1,3 +1,5 @@
+// src/lib/sequence-engine/executors/index.ts
+
 import { executeConnectionRequest } from "./connectionRequest";
 import { executeMessage } from "./message";
 import { executeFollowUp } from "./followUp";
@@ -10,6 +12,7 @@ export const stepExecutors = {
   FOLLOW_UP: executeFollowUp,
   WAIT: executeWait,
   EMAIL: executeEmail,
+  // Stubs for future step types — won't crash the runner
   VOICE_NOTE: async () => {
     console.log("🎤 VOICE_NOTE — not implemented yet");
     return { success: true };

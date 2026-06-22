@@ -1,3 +1,4 @@
+// src/app/api/campaigns/[id]/steps/[stepId]/route.ts
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
@@ -16,6 +17,7 @@ export async function PUT(
       where: { id: stepId },
       data: {
         ...(body.content !== undefined && { content: body.content }),
+        // ✅ subject is properly saved
         ...(body.subject !== undefined && { subject: body.subject }),
         ...(body.delay !== undefined && { delay: Number(body.delay) }),
         ...(body.type !== undefined && { type: body.type }),

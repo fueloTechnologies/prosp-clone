@@ -1,11 +1,15 @@
+// src/app/api/runner/route.ts
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { stepExecutors } from "@/lib/sequence-engine/executors";
 
 let isRunnerRunning = false;
 
-function personalize(content: string, contact: any) {
-  // Clean each field before substituting
+/* ─────────────────────────────────────────
+   Personalize both content AND subject
+───────────────────────────────────────── */
+function personalize(content: string, contact: any): string {
+  if (!content) return "";
   const firstName = (contact.firstName || "").split(" ")[0].trim();
   const lastName = (contact.lastName || "").trim();
   const company = (contact.company || "").split("·")[0].split("|")[0].trim();
@@ -65,10 +69,10 @@ export async function GET() {
 
     for (const cc of contacts) {
       console.log(
-        `\n📋 Processing contact: ${cc.contact.firstName} | step index: ${cc.currentStep}`,
+        `\n📋 Processing: ${cc.contact.firstName} | currentStep: ${cc.currentStep}`,
       );
 
-      // Get the current step (order = currentStep + 1 because order is 1-based)
+      // order is 1-based; currentStep starts at 0
       const step = await prisma.campaignStep.findFirst({
         where: { campaignId: cc.campaignId, order: cc.currentStep + 1 },
       });
@@ -84,21 +88,40 @@ export async function GET() {
 
       console.log(`Step: ${step.type} (order ${step.order})`);
 
-      // Get last execution for this contact
+      // ✅ FIX: get last execution filtered by THIS step's id so WAIT doesn't
+      //    accidentally read a previous step's execution as its own.
       const lastExecution = await prisma.campaignStepExecution.findFirst({
-        where: { campaignContactId: cc.id } as any,
+        where: {
+          campaignContactId: cc.id,
+          stepId: step.id,
+        } as any,
         orderBy: { executedAt: "desc" },
       });
 
-      // ── WAIT STEP: check if delay period is over ──
+      // ── WAIT STEP ──
       if (step.type === "WAIT") {
-        if (!lastExecution) {
-          console.log("⏳ WAIT: no previous execution yet — skipping");
+        // Get the execution of the PREVIOUS step so we know when it finished
+        const prevStep = await prisma.campaignStep.findFirst({
+          where: { campaignId: cc.campaignId, order: cc.currentStep },
+        });
+
+        const prevExecution = prevStep
+          ? await prisma.campaignStepExecution.findFirst({
+              where: {
+                campaignContactId: cc.id,
+                stepId: prevStep.id,
+              } as any,
+              orderBy: { executedAt: "desc" },
+            })
+          : null;
+
+        if (!prevExecution) {
+          console.log("⏳ WAIT: no previous step execution yet — skipping");
           continue;
         }
 
         const waitHours = step.delay || 1;
-        const waitUntil = new Date(lastExecution.executedAt!);
+        const waitUntil = new Date(prevExecution.executedAt!);
         waitUntil.setHours(waitUntil.getHours() + waitHours);
 
         if (new Date() < waitUntil) {
@@ -107,17 +130,19 @@ export async function GET() {
           continue;
         }
 
-        // Wait is done — advance to next step
+        // Wait period over — record and advance
         console.log("✅ WAIT completed — advancing");
-        await prisma.campaignStepExecution.create({
-          data: {
-            campaignContactId: cc.id,
-            stepId: step.id,
-            status: "COMPLETED",
-            scheduledFor: new Date(),
-            executedAt: new Date(),
-          } as any,
-        });
+        if (!lastExecution) {
+          await prisma.campaignStepExecution.create({
+            data: {
+              campaignContactId: cc.id,
+              stepId: step.id,
+              status: "COMPLETED",
+              scheduledFor: new Date(),
+              executedAt: new Date(),
+            } as any,
+          });
+        }
         await prisma.campaignContact.update({
           where: { id: cc.id },
           data: { currentStep: cc.currentStep + 1, status: "IN_PROGRESS" },
@@ -125,7 +150,7 @@ export async function GET() {
         continue;
       }
 
-      // ── ALL OTHER STEPS: get campaign userId and conversation ──
+      // ── ALL OTHER STEPS ──
       const campaign = await prisma.campaign.findUnique({
         where: { id: cc.campaignId },
       });
@@ -142,13 +167,15 @@ export async function GET() {
         });
       }
 
+      // ✅ FIX: personalize both content AND subject
       const finalContent = personalize(step.content || "", cc.contact);
-      console.log("Personalized content:", finalContent?.slice(0, 80));
+      const finalSubject = personalize(step.subject || "", cc.contact);
 
-      // ── Run executor ──
+      console.log("Content:", finalContent?.slice(0, 80));
+
       const executor = stepExecutors[step.type as keyof typeof stepExecutors];
       if (!executor) {
-        console.log(`⚠️ No executor for step type: ${step.type}`);
+        console.log(`⚠️ No executor for: ${step.type}`);
         continue;
       }
 
@@ -160,14 +187,15 @@ export async function GET() {
         stepIndex: cc.currentStep,
         lastExecution,
         finalContent,
+        finalSubject, // ✅ passed through
       });
 
-      if (!result.success) {
+      if (!result.success && !(result as any).skipped) {
         console.log(`❌ Executor failed for ${step.type}`);
         continue;
       }
 
-      // ── Record execution ──
+      // Record execution
       await prisma.campaignStepExecution.create({
         data: {
           campaignContactId: cc.id,
@@ -178,7 +206,7 @@ export async function GET() {
         } as any,
       });
 
-      // ── Check if there's a next step ──
+      // Check if there's a next step
       const nextStep = await prisma.campaignStep.findFirst({
         where: { campaignId: cc.campaignId, order: cc.currentStep + 2 },
       });
@@ -190,19 +218,13 @@ export async function GET() {
           data: { status: "COMPLETED" },
         });
       } else {
-        // If next step has a delay, set nextSendAt so we don't process too early
         let nextSendAt = new Date();
-        if (nextStep.type === "WAIT") {
-          // WAIT step delay is handled by the wait executor — just advance immediately
-          nextSendAt = new Date();
-        } else if (nextStep.delay && nextStep.delay > 0) {
+        if (nextStep.type !== "WAIT" && nextStep.delay && nextStep.delay > 0) {
           nextSendAt = new Date();
           nextSendAt.setHours(nextSendAt.getHours() + nextStep.delay);
         }
 
-        console.log(
-          `➡️ Advancing to step ${cc.currentStep + 2}, next run at: ${nextSendAt}`,
-        );
+        console.log(`➡️ Advancing to step ${cc.currentStep + 2}`);
         await prisma.campaignContact.update({
           where: { id: cc.id },
           data: {

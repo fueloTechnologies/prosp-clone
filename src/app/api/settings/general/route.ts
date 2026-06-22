@@ -10,18 +10,25 @@ export async function GET() {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { name: true, email: true, image: true },
+    select: {
+      name: true,
+      email: true,
+      image: true,
+      settings: true,
+    },
   });
 
-  const parts = user?.name?.split(" ") || [];
+  const parts = (user?.name || "").split(" ");
+
   return NextResponse.json({
     firstName: parts[0] || "",
     lastName: parts.slice(1).join(" ") || "",
-    workspaceName: user?.name || "",
-    avatar: user?.image || "",
-    // timezone & language stored in image field as JSON prefix — or add a Settings model
-    timezone: "Asia/Kolkata",
-    language: "English",
+    email: user?.email || "",
+    workspaceName: user?.settings?.workspaceName || user?.name || "",
+    timezone: user?.settings?.timezone || "Asia/Kolkata",
+    language: user?.settings?.language || "English",
+    // avatar: prefer saved avatar, fall back to OAuth image
+    avatar: user?.settings?.avatar || user?.image || "",
   });
 }
 
@@ -32,16 +39,31 @@ export async function POST(req: Request) {
   const { firstName, lastName, workspaceName, timezone, language, avatar } =
     await req.json();
 
-  const name = workspaceName || `${firstName} ${lastName}`.trim();
+  const name = `${firstName} ${lastName}`.trim() || workspaceName || "User";
 
+  // Update display name on user
   await prisma.user.update({
     where: { id: session.user.id },
-    data: {
-      name,
-      // ✅ Save avatar to the image field — this is the NextAuth standard field
-      ...(avatar ? { image: avatar } : {}),
+    data: { name },
+  });
+
+  // Upsert settings (create if first save, update if exists)
+  await prisma.userSettings.upsert({
+    where: { userId: session.user.id },
+    create: {
+      userId: session.user.id,
+      workspaceName: workspaceName || name,
+      timezone: timezone || "Asia/Kolkata",
+      language: language || "English",
+      ...(avatar ? { avatar } : {}),
+    },
+    update: {
+      workspaceName: workspaceName || name,
+      timezone: timezone || "Asia/Kolkata",
+      language: language || "English",
+      ...(avatar ? { avatar } : {}),
     },
   });
 
-  return NextResponse.json({ success: true, name, image: avatar });
+  return NextResponse.json({ success: true });
 }
