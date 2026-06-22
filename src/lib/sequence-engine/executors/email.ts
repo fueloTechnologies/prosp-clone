@@ -2,7 +2,13 @@
 import { Resend } from "resend";
 import prisma from "@/lib/prisma";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+function getResend() {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is not configured");
+  }
+
+  return new Resend(process.env.RESEND_API_KEY);
+}
 
 export async function executeEmail({
   cc,
@@ -27,6 +33,7 @@ export async function executeEmail({
   const fromEmail = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
 
   try {
+    const resend = getResend();
     const { data, error } = await resend.emails.send({
       from: `Prosp <${fromEmail}>`,
       to: contactEmail,
