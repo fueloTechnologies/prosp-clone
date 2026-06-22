@@ -1,9 +1,15 @@
 // src/lib/openai.ts
 import OpenAI from 'openai'
 
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+function getOpenAI() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured')
+  }
+
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+}
 
 export interface PersonalizeOptions {
   contactFirstName: string
@@ -57,7 +63,7 @@ ${template ? `Base template to personalize: ${template}` : ''}
 
 Write a highly personalized ${channel} message. Be specific, be human, be brief.
 ${channel === 'email' ? 'Format: SUBJECT: [subject]\n\n[body]' : 'Format: Just the message body.'}`
-
+const openai = getOpenAI()
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
@@ -76,6 +82,7 @@ export async function generateSequenceIdeas(
   targetPersona: string,
   goal: string
 ): Promise<{ subject: string; steps: Array<{ type: string; content: string; delay: number }> }> {
+  const openai = getOpenAI()
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
@@ -114,6 +121,7 @@ export async function generateAIReply(
   contactName: string,
   context: string
 ): Promise<string> {
+  const openai = getOpenAI()
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
