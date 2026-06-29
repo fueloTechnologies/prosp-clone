@@ -1,15 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Linkedin,
   Trash2,
   X,
   Eye,
   EyeOff,
-  Plug,
   KeyRound,
   Cookie,
+  Puzzle,
 } from "lucide-react";
 
 interface LinkedInAccount {
@@ -27,7 +28,7 @@ interface Props {
   onRefresh: () => void;
 }
 
-type ModalType = "credentials" | "extension" | "manual" | null;
+type ModalType = "credentials" | "manual" | null;
 
 // ─── Modal: Connect with Credentials ────────────────────────────────────────
 function CredentialsModal({
@@ -134,131 +135,6 @@ function CredentialsModal({
   );
 }
 
-// ─── Modal: Connect with Extension ──────────────────────────────────────────
-function ExtensionModal({
-  onClose,
-  onSuccess,
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [status, setStatus] = useState<"idle" | "waiting" | "done" | "error">(
-    "idle",
-  );
-  const [error, setError] = useState("");
-
-  async function startExtensionConnect() {
-    setStatus("waiting");
-    setError("");
-    try {
-      // Tell the extension to grab the LinkedIn session cookie
-      // The extension will POST to /api/extension/connect with the cookie
-      // We poll our API until the account appears
-      const res = await fetch("/api/extension/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "grab_linkedin_cookie" }),
-      });
-      if (!res.ok)
-        throw new Error(
-          "Extension not responding. Make sure it's installed and active.",
-        );
-      setStatus("done");
-      setTimeout(() => {
-        onSuccess();
-        onClose();
-      }, 1500);
-    } catch (e: any) {
-      setError(e.message);
-      setStatus("error");
-    }
-  }
-
-  return (
-    <ModalShell
-      onClose={onClose}
-      title="Connect with our extension"
-      icon={<Plug size={18} className="text-purple-600" />}
-    >
-      {status === "idle" && (
-        <>
-          <p className="text-sm text-gray-500 mb-4">
-            The easiest and safest way to connect. Our Chrome extension reads
-            your active LinkedIn session — no password needed.
-          </p>
-          <ol className="space-y-3 mb-5">
-            {[
-              "Install the Prosp Chrome extension (if not already)",
-              "Log into LinkedIn in your browser",
-              "Click the button below — we'll do the rest",
-            ].map((step, i) => (
-              <li key={i} className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-xs font-bold flex items-center justify-center mt-0.5">
-                  {i + 1}
-                </span>
-                <span className="text-sm text-gray-600">{step}</span>
-              </li>
-            ))}
-          </ol>
-          <div className="flex gap-2 justify-end">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={startExtensionConnect}
-              className="px-5 py-2 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-medium transition"
-            >
-              Connect via Extension
-            </button>
-          </div>
-        </>
-      )}
-      {status === "waiting" && (
-        <div className="py-8 text-center">
-          <div className="w-10 h-10 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-sm text-gray-600">
-            Waiting for extension to connect…
-          </p>
-        </div>
-      )}
-      {status === "done" && (
-        <div className="py-8 text-center">
-          <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
-            <span className="text-green-600 text-xl">✓</span>
-          </div>
-          <p className="text-sm text-gray-700 font-medium">
-            LinkedIn account connected!
-          </p>
-        </div>
-      )}
-      {status === "error" && (
-        <>
-          <p className="text-sm text-red-500 bg-red-50 px-3 py-2 rounded-lg mb-4">
-            {error}
-          </p>
-          <div className="flex gap-2 justify-end">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => setStatus("idle")}
-              className="px-4 py-2 text-sm bg-purple-600 text-white rounded-xl transition"
-            >
-              Try again
-            </button>
-          </div>
-        </>
-      )}
-    </ModalShell>
-  );
-}
-
 // ─── Modal: Connect Manually (Cookie) ────────────────────────────────────────
 function ManualModal({
   onClose,
@@ -306,7 +182,7 @@ function ManualModal({
       <p className="text-sm text-gray-500 mb-4">
         Paste your LinkedIn{" "}
         <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">li_at</code>{" "}
-        session cookie. You can find this in your browser's DevTools under
+        session cookie. You can find this in your browser&apos;s DevTools under
         Application → Cookies → linkedin.com.
       </p>
       <div className="space-y-3">
@@ -400,7 +276,7 @@ function ModalShell({
 
 // ─── Connection Method definitions ───────────────────────────────────────────
 const CONNECTION_METHODS: {
-  key: ModalType;
+  key: ModalType | "extension";
   label: string;
   icon: any;
   badge: string;
@@ -414,7 +290,7 @@ const CONNECTION_METHODS: {
   {
     key: "extension",
     label: "Connect with our extension",
-    icon: Plug,
+    icon: Puzzle,
     badge: "Easy",
   },
   { key: "manual", label: "Connect manually", icon: Cookie, badge: "Easy" },
@@ -426,8 +302,19 @@ export default function AccountsSettings({
   loading,
   onRefresh,
 }: Props) {
+  const router = useRouter();
   const [showDropdown, setShowDropdown] = useState(false);
   const [modal, setModal] = useState<ModalType>(null);
+
+  function handleMethodClick(key: ModalType | "extension") {
+    setShowDropdown(false);
+    if (key === "extension") {
+      // Navigate to the full extension guide page
+      router.push("/extension-guide");
+    } else {
+      setModal(key);
+    }
+  }
 
   async function toggleStatus(id: string, currentStatus: string) {
     const newStatus = currentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
@@ -458,9 +345,6 @@ export default function AccountsSettings({
           onSuccess={onRefresh}
         />
       )}
-      {modal === "extension" && (
-        <ExtensionModal onClose={() => setModal(null)} onSuccess={onRefresh} />
-      )}
       {modal === "manual" && (
         <ManualModal onClose={() => setModal(null)} onSuccess={onRefresh} />
       )}
@@ -469,7 +353,7 @@ export default function AccountsSettings({
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Accounts</h1>
         <p className="text-gray-500 mt-1">
-          Automate LinkedIn actions right from within Prosp.
+          Automate LinkedIn actions right from within your workspace.
         </p>
       </div>
 
@@ -483,7 +367,7 @@ export default function AccountsSettings({
             <div>
               <h2 className="font-semibold text-gray-900">Connect LinkedIn</h2>
               <p className="text-sm text-gray-400">
-                Connect LinkedIn description
+                Automate LinkedIn actions right from within Prosp.
               </p>
             </div>
           </div>
@@ -505,23 +389,26 @@ export default function AccountsSettings({
                   onClick={() => setShowDropdown(false)}
                 />
                 <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-gray-100 rounded-2xl shadow-2xl z-20 overflow-hidden">
-                  {CONNECTION_METHODS.map((method) => (
-                    <button
-                      key={String(method.key)}
-                      onClick={() => {
-                        setModal(method.key);
-                        setShowDropdown(false);
-                      }}
-                      className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50 transition text-left border-b border-gray-50 last:border-0"
-                    >
-                      <span className="text-sm font-medium text-gray-800">
-                        {method.label}
-                      </span>
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                        {method.badge}
-                      </span>
-                    </button>
-                  ))}
+                  {CONNECTION_METHODS.map((method) => {
+                    const Icon = method.icon;
+                    return (
+                      <button
+                        key={String(method.key)}
+                        onClick={() => handleMethodClick(method.key)}
+                        className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50 transition text-left border-b border-gray-50 last:border-0"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Icon size={15} className="text-gray-400" />
+                          <span className="text-sm font-medium text-gray-800">
+                            {method.label}
+                          </span>
+                        </div>
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                          {method.badge}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </>
             )}

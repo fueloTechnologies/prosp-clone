@@ -1,18 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Linkedin,
   Trash2,
   X,
   Eye,
   EyeOff,
-  Plug,
   KeyRound,
   Cookie,
+  Puzzle,
 } from "lucide-react";
 
-type ModalType = "credentials" | "extension" | "manual" | null;
+type ModalType = "credentials" | "manual" | null;
 
 interface LinkedInAccount {
   id: string;
@@ -167,92 +168,6 @@ function CredentialsModal({
   );
 }
 
-// ─── Modal: Connect with Extension ───────────────────────────────────────────
-// ─── Modal: Connect with Extension (installation guide) ──────────────────────
-function ExtensionModal({
-  onClose,
-  onSuccess,
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const STEPS = [
-    {
-      title: "Download our Extension",
-      desc: "Download the extension zip file to your computer.",
-      extra: (
-        <a
-          href="/prosp-extension.zip"
-          download
-          className="inline-flex items-center gap-1.5 text-xs text-purple-600 font-medium hover:underline mt-1"
-        >
-          ↓ Download prosp-extension.zip
-        </a>
-      ),
-    },
-    {
-      title: "Extract the Zip file",
-      desc: 'Right-click the ZIP and choose "Extract All" — this creates a folder with the extension files.',
-    },
-    {
-      title: "Open chrome://extensions",
-      desc: "Type this in your Chrome address bar and press Enter.",
-      extra: (
-        <code className="text-xs bg-gray-100 px-2 py-1 rounded-lg text-gray-600 mt-1 inline-block">
-          chrome://extensions/
-        </code>
-      ),
-    },
-    {
-      title: "Enable Developer Mode",
-      desc: 'Toggle "Developer mode" ON in the top-right corner of that page.',
-    },
-    {
-      title: 'Click "Load unpacked"',
-      desc: 'Press "Load unpacked", select the extracted folder, and click "Open".',
-    },
-    {
-      title: "Done! Go back to Prosp",
-      desc: "The extension is now active. Return here and click Add account → Connect with our extension.",
-    },
-  ];
-
-  return (
-    <ModalShell
-      onClose={onClose}
-      title="Connect with our extension"
-      icon={<Plug size={18} className="text-purple-600" />}
-    >
-      <p className="text-sm text-gray-500 mb-4">
-        Install our Chrome extension to connect your LinkedIn account safely —
-        no password needed.
-      </p>
-      <ol className="space-y-3 mb-5 max-h-72 overflow-y-auto pr-1">
-        {STEPS.map((step, i) => (
-          <li key={i} className="flex items-start gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-xs font-bold flex items-center justify-center mt-0.5">
-              {i + 1}
-            </span>
-            <div>
-              <p className="text-sm font-medium text-gray-800">{step.title}</p>
-              <p className="text-xs text-gray-500 mt-0.5">{step.desc}</p>
-              {step.extra && step.extra}
-            </div>
-          </li>
-        ))}
-      </ol>
-      <div className="flex justify-end">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition"
-        >
-          Close
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-
 // ─── Modal: Connect Manually (Cookie) ────────────────────────────────────────
 function ManualModal({
   onClose,
@@ -354,22 +269,20 @@ function ManualModal({
 }
 
 // ─── Connection methods config ────────────────────────────────────────────────
-const CONNECTION_METHODS = [
-  {
-    key: "credentials" as ModalType,
-    label: "Connect with credentials",
-    badge: "Easy",
-  },
-  {
-    key: "extension" as ModalType,
-    label: "Connect with our extension",
-    badge: "Easy",
-  },
-  { key: "manual" as ModalType, label: "Connect manually", badge: "Easy" },
+const CONNECTION_METHODS: {
+  key: ModalType | "extension";
+  label: string;
+  badge: string;
+  icon: any;
+}[] = [
+  { key: "credentials", label: "Connect with credentials", badge: "Easy", icon: KeyRound },
+  { key: "extension",   label: "Connect with our extension", badge: "Easy", icon: Puzzle },
+  { key: "manual",      label: "Connect manually", badge: "Easy", icon: Cookie },
 ];
 
-// ─── Main AccountsTab (no props — fetches its own data) ──────────────────────
+// ─── Main AccountsTab ─────────────────────────────────────────────────────────
 export default function AccountsTab() {
+  const router = useRouter();
   const [accounts, setAccounts] = useState<LinkedInAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -391,6 +304,16 @@ export default function AccountsTab() {
   useEffect(() => {
     fetchAccounts();
   }, []);
+
+  function handleMethodClick(key: ModalType | "extension") {
+    setShowDropdown(false);
+    if (key === "extension") {
+      // ✅ Navigate to the full-page extension guide
+      router.push("/extension-guide");
+    } else {
+      setModal(key);
+    }
+  }
 
   async function toggleStatus(id: string, currentStatus: string) {
     const newStatus = currentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
@@ -417,12 +340,6 @@ export default function AccountsTab() {
       {/* Modals */}
       {modal === "credentials" && (
         <CredentialsModal
-          onClose={() => setModal(null)}
-          onSuccess={fetchAccounts}
-        />
-      )}
-      {modal === "extension" && (
-        <ExtensionModal
           onClose={() => setModal(null)}
           onSuccess={fetchAccounts}
         />
@@ -471,23 +388,26 @@ export default function AccountsTab() {
                   onClick={() => setShowDropdown(false)}
                 />
                 <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-gray-100 rounded-2xl shadow-2xl z-20 overflow-hidden">
-                  {CONNECTION_METHODS.map((method) => (
-                    <button
-                      key={String(method.key)}
-                      onClick={() => {
-                        setModal(method.key);
-                        setShowDropdown(false);
-                      }}
-                      className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50 transition text-left border-b border-gray-50 last:border-0"
-                    >
-                      <span className="text-sm font-medium text-gray-800">
-                        {method.label}
-                      </span>
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                        {method.badge}
-                      </span>
-                    </button>
-                  ))}
+                  {CONNECTION_METHODS.map((method) => {
+                    const Icon = method.icon;
+                    return (
+                      <button
+                        key={String(method.key)}
+                        onClick={() => handleMethodClick(method.key)}
+                        className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50 transition text-left border-b border-gray-50 last:border-0"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Icon size={15} className="text-gray-400" />
+                          <span className="text-sm font-medium text-gray-800">
+                            {method.label}
+                          </span>
+                        </div>
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                          {method.badge}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </>
             )}
